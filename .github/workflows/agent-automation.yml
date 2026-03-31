@@ -66,6 +66,20 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ steps.app-token.outputs.token }}
+          show_full_output: "true"
+          display_report: "true"
+          plugin_marketplaces: |
+            https://github.com/braintrustdata/braintrust-claude-plugin.git
+          plugins: |
+            trace-claude-code@braintrust-claude-plugin
+          settings: |
+            {
+              "env": {
+                "TRACE_TO_BRAINTRUST": "true",
+                "BRAINTRUST_CC_PROJECT": "${{ vars.BRAINTRUST_CC_PROJECT }}",
+                "BRAINTRUST_API_KEY": "${{ secrets.BRAINTRUST_API_KEY }}"
+              }
+            }
           prompt: |
             # Goal
 
@@ -138,6 +152,6 @@ jobs:
             - If there are no high-confidence non-duplicate gaps, do nothing.
           claude_args: |
             --model claude-opus-4-6
-            --max-turns 20
+            --max-turns 100
             --allowedTools "Read,Glob,Grep,LS,WebSearch,WebFetch,mcp__github__get_issue,mcp__github__get_issue_comments,mcp__github__search_issues,mcp__github__list_issues,mcp__github__create_issue"
             --disallowedTools "Bash,Edit,MultiEdit,Write,Replace,NotebookEditCell,mcp__github__create_issue_comment,mcp__github__update_issue,mcp__github__create_pr,mcp__github__create_or_update_file,mcp__github__delete_file,mcp__github_file_ops__commit_files,mcp__github_file_ops__delete_files"

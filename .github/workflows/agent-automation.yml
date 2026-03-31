@@ -1,67 +1,70 @@
-name: Agent Automation Reusable
+name: Agent Automation
 
 on:
-  workflow_call:
-    inputs:
-      target_owner:
-        description: GitHub org/user for app token minting.
-        required: true
-        type: string
-      target_repo:
-        description: Repository name for app token minting.
-        required: true
-        type: string
-      language_prompt_addendum:
-        description: Optional SDK-specific prompt guidance.
-        required: false
-        default: ""
-        type: string
-      max_issues:
-        description: Maximum number of issues to create in one run.
-        required: false
-        default: 5
-        type: number
-    secrets:
-      braintrust_bot_app_id:
-        required: true
-      braintrust_bot_private_key:
-        required: true
-      anthropic_api_key:
-        required: true
+  schedule:
+    - cron: "0 6 * * 1-5"
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: provider-gap-audit-${{ github.repository }}-${{ github.ref }}
+  group: provider-gap-audit-scheduled-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   audit-sdk-coverage:
-    name: Audit SDK Coverage
+    name: Audit SDK Coverage (${{ matrix.repo }})
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - owner: braintrustdata
+            repo: braintrust-sdk-javascript
+            max_issues: 3
+          - owner: braintrustdata
+            repo: braintrust-sdk-python
+            max_issues: 3
+          - owner: braintrustdata
+            repo: braintrust-sdk-go
+            max_issues: 3
+          - owner: braintrustdata
+            repo: braintrust-sdk-ruby
+            max_issues: 3
+          - owner: braintrustdata
+            repo: braintrust-sdk-rust
+            max_issues: 3
+          - owner: braintrustdata
+            repo: braintrust-sdk-java
+            max_issues: 3
+          - owner: braintrustdata
+            repo: braintrust-sdk-dotnet
+            max_issues: 3
     steps:
       - name: Generate GitHub App token
         id: app-token
         uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0
         with:
-          app-id: ${{ secrets.braintrust_bot_app_id }}
-          private-key: ${{ secrets.braintrust_bot_private_key }}
-          owner: ${{ inputs.target_owner }}
+          app-id: ${{ secrets.BRAINTRUST_BOT_APP_ID }}
+          private-key: ${{ secrets.BRAINTRUST_BOT_PRIVATE_KEY }}
+          owner: ${{ matrix.owner }}
           repositories: |
-            ${{ inputs.target_repo }}
+            ${{ matrix.repo }}
           permission-contents: read
           permission-issues: write
 
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
+          repository: ${{ matrix.owner }}/${{ matrix.repo }}
+          token: ${{ steps.app-token.outputs.token }}
           persist-credentials: false
 
       - name: Run Claude provider gap audit
         uses: anthropics/claude-code-action@df37d2f0760a4b5683a6e617c9325bc1a36443f6 # v1.0.75
         with:
-          anthropic_api_key: ${{ secrets.anthropic_api_key }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ steps.app-token.outputs.token }}
           prompt: |
             # Goal
@@ -98,16 +101,12 @@ jobs:
             - A vague suspicion that "something in streaming may be missing" without a concrete upstream API and a concrete repo gap.
             - Opening a separate issue for every release note bullet when they all describe the same missing instrumentation area.
 
-            # SDK-Specific Guidance
-
-            ${{ inputs.language_prompt_addendum }}
-
             # If You Find Actionable Non-Duplicate Gaps
 
-            - Create at most ${{ inputs.max_issues }} issues in this run.
+            - Create at most ${{ matrix.max_issues }} issues in this run.
             - Create one issue per distinct gap.
             - Keep each issue concise, concrete, and source-backed.
-            - When creating an issue, always apply the `bot-automation` label.
+            - Prefix every created issue title with `[BOT ISSUE] `.
             - If the repository supports issue types, choose whichever type fits best (`Bug`, `Feature`, or `Task`). If issue types are unavailable, create the issue without type.
             - Include a hidden marker comment near the top of the issue body in this exact form:
 

@@ -75,6 +75,8 @@ jobs:
           settings: |
             {
               "env": {
+                "TARGET_REPO_OWNER": "${{ matrix.owner }}",
+                "TARGET_REPO_NAME": "${{ matrix.repo }}",
                 "TRACE_TO_BRAINTRUST": "true",
                 "BRAINTRUST_CC_PROJECT": "${{ vars.BRAINTRUST_CC_PROJECT }}",
                 "BRAINTRUST_API_KEY": "${{ secrets.BRAINTRUST_API_KEY }}"
@@ -101,6 +103,9 @@ jobs:
             3. Compare current upstream capabilities to current Braintrust instrumentation in this repo.
             4. Always check the latest Braintrust docs at https://www.braintrust.dev/docs before deciding how to describe a gap.
             5. Search existing GitHub issues for duplicates before creating anything.
+               - Only search in `TARGET_REPO_OWNER/TARGET_REPO_NAME`.
+               - For every GitHub MCP tool call (`mcp__github__search_issues`, `mcp__github__list_issues`, `mcp__github__get_issue`, `mcp__github__get_issue_comments`, `mcp__github__create_issue`), explicitly pass owner=`TARGET_REPO_OWNER` and repo=`TARGET_REPO_NAME`. `TARGET_REPO_OWNER` and `TARGET_REPO_NAME` are environment variables.
+               - Never query or create issues in the repository running this workflow.
             6. Only act on high-confidence, concrete gaps tied to missing APIs, unsupported call patterns, or missing instrumentation detail.
 
             # Examples

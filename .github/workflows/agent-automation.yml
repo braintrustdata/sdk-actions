@@ -85,14 +85,16 @@ jobs:
           prompt: |
             # Goal
 
-            Find important instrumentation gaps in this repository's AI-facing integrations.
+            Find important instrumentation gaps in this repository's generative-AI and embeddings integrations.
 
             A gap means the upstream SDK or framework clearly supports something that this repository does not yet instrument, or instruments with materially less detail.
 
             # Scope
 
             - Infer the relevant surfaces from the checked-out repository itself.
-            - Focus on repo-owned AI instrumentation surfaces with meaningful upstream API, docs, and release surfaces.
+            - Focus only on repo-owned generative or embeddings execution instrumentation surfaces with meaningful upstream API, docs, and release surfaces.
+            - In-scope examples include generations/completions/responses APIs, embeddings APIs, streaming generation flows, tool-calling during model execution, and agentic run/tracing surfaces.
+            - Explicitly exclude CRUD-style parity work (resource create/list/retrieve/update/delete APIs, admin/configuration endpoints, and similar non-generative management APIs).
             - Ignore generic runtime or infrastructure integrations that do not have an upstream AI API surface to compare against.
             - Do not open parity issues for deprecated or no-op surfaces unless you find real deprecation drift or docs drift worth reporting.
 
@@ -100,13 +102,13 @@ jobs:
 
             1. Inspect local code, tests, docs, examples, and e2e scenarios to understand what is already instrumented.
             2. For each relevant surface, independently discover the current official upstream docs and recent official releases or changelogs.
-            3. Compare current upstream capabilities to current Braintrust instrumentation in this repo.
+            3. Compare current upstream generative and embeddings execution capabilities to current Braintrust instrumentation in this repo.
             4. Always check the latest Braintrust docs at https://www.braintrust.dev/docs before deciding how to describe a gap.
             5. Search existing GitHub issues for duplicates before creating anything.
                - Only search in `TARGET_REPO_OWNER/TARGET_REPO_NAME`.
                - For every GitHub MCP tool call (`mcp__github__search_issues`, `mcp__github__list_issues`, `mcp__github__get_issue`, `mcp__github__get_issue_comments`, `mcp__github__create_issue`), explicitly pass owner=`TARGET_REPO_OWNER` and repo=`TARGET_REPO_NAME`. `TARGET_REPO_OWNER` and `TARGET_REPO_NAME` are environment variables.
                - Never query or create issues in the repository running this workflow.
-            6. Only act on high-confidence, concrete gaps tied to missing APIs, unsupported call patterns, or missing instrumentation detail.
+            6. Only act on high-confidence, concrete gaps tied to missing generative or embeddings execution APIs, unsupported model execution call patterns, or missing execution instrumentation detail.
 
             # Examples
 
@@ -114,11 +116,13 @@ jobs:
 
             - The upstream SDK now has a stable `responses.stream()` helper, but this repo does not instrument it at all, or instruments it without final result metadata that other similar APIs already capture here.
             - This repo instruments a provider's basic text generation API, but not its newer tool-calling or agent tracing API even though that API is now official and documented.
+            - The upstream SDK has an official embeddings API surface (for example batch embeddings options), but this repo does not instrument those embeddings calls with the same depth as comparable model execution APIs.
 
             ## Bad
 
             - A vague suspicion that "something in streaming may be missing" without a concrete upstream API and a concrete repo gap.
             - Opening a separate issue for every release note bullet when they all describe the same missing instrumentation area.
+            - Filing an issue for CRUD-only endpoint coverage (for example files/threads/assistants management APIs) when no generative or embeddings execution instrumentation gap is involved.
 
             # If You Find Actionable Non-Duplicate Gaps
 

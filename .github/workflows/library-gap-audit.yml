@@ -1,0 +1,167 @@
+name: Library Gap Audit
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: library-gap-audit-scheduled-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  audit-library-coverage:
+    name: Audit Library Coverage (${{ matrix.repo }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - owner: braintrustdata
+            repo: braintrust-sdk-javascript
+            max_issues: 3
+          - owner: braintrustdata
+            repo: braintrust-sdk-python
+            max_issues: 3
+          - owner: braintrustdata
+            repo: braintrust-sdk-go
+            max_issues: 3
+          - owner: braintrustdata
+            repo: braintrust-sdk-ruby
+            max_issues: 3
+          - owner: braintrustdata
+            repo: braintrust-sdk-rust
+            max_issues: 3
+          - owner: braintrustdata
+            repo: braintrust-sdk-java
+            max_issues: 3
+          - owner: braintrustdata
+            repo: braintrust-sdk-dotnet
+            max_issues: 3
+    steps:
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0
+        with:
+          app-id: ${{ secrets.BRAINTRUST_BOT_APP_ID }}
+          private-key: ${{ secrets.BRAINTRUST_BOT_PRIVATE_KEY }}
+          owner: ${{ matrix.owner }}
+          repositories: |
+            ${{ matrix.repo }}
+          permission-contents: read
+          permission-issues: write
+
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          repository: ${{ matrix.owner }}/${{ matrix.repo }}
+          token: ${{ steps.app-token.outputs.token }}
+          persist-credentials: false
+
+      - name: Run Claude library gap audit
+        uses: anthropics/claude-code-action@df37d2f0760a4b5683a6e617c9325bc1a36443f6 # v1.0.75
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ steps.app-token.outputs.token }}
+          show_full_output: "true"
+          display_report: "true"
+          plugin_marketplaces: |
+            https://github.com/braintrustdata/braintrust-claude-plugin.git
+          plugins: |
+            trace-claude-code@braintrust-claude-plugin
+          settings: |
+            {
+              "env": {
+                "TARGET_REPO_OWNER": "${{ matrix.owner }}",
+                "TARGET_REPO_NAME": "${{ matrix.repo }}",
+                "TRACE_TO_BRAINTRUST": "true",
+                "BRAINTRUST_CC_PROJECT": "${{ vars.BRAINTRUST_CC_PROJECT }}",
+                "BRAINTRUST_API_KEY": "${{ secrets.BRAINTRUST_API_KEY }}"
+              }
+            }
+          prompt: |
+            # Goal
+
+            Find important libraries that this repository should instrument for generative-AI, embeddings, or agent execution, but does not yet instrument.
+
+            A gap means an external library with a meaningful execution API surface and official documentation/release signals that is not currently instrumented in this repository.
+
+            # Scope
+
+            - Infer currently instrumented libraries from this repository's code, tests, docs, examples, and e2e scenarios.
+            - Focus only on execution-oriented generative-AI, embeddings, and agent-run libraries with meaningful upstream API, docs, and release surfaces.
+            - In-scope examples include model generation/completions/responses surfaces, embeddings execution surfaces, streaming generation flows, tool-calling during model execution, and agent-run/tracing surfaces.
+            - Explicitly exclude CRUD/admin/configuration/non-execution libraries and generic runtime infrastructure tooling.
+            - Exclude speculative, weak-signal, or low-confidence library candidates.
+            - It is not in scope to point out missing instrumentation for libraries that a braintrust SDK already has instrumentation for. Only point out libraries that are completely uninstrumented yet.
+            - Do not open issues for deprecated/no-op surfaces unless there is concrete deprecation or docs drift worth reporting.
+
+            # Process
+
+            1. Inspect local code, tests, docs, examples, and e2e scenarios to determine what libraries are already instrumented.
+            2. Independently discover candidate libraries with official upstream docs and recent official release/changelog signals.
+            3. For each candidate, compare current upstream execution capabilities to current Braintrust instrumentation in this repo.
+            4. Always check the latest Braintrust docs at https://www.braintrust.dev/docs before deciding how to describe a gap.
+            5. Search existing GitHub issues for duplicates before creating anything.
+               - Only search in `TARGET_REPO_OWNER/TARGET_REPO_NAME`.
+               - For every GitHub MCP tool call (`mcp__github__search_issues`, `mcp__github__list_issues`, `mcp__github__get_issue`, `mcp__github__get_issue_comments`, `mcp__github__create_issue`), explicitly pass owner=`TARGET_REPO_OWNER` and repo=`TARGET_REPO_NAME`. `TARGET_REPO_OWNER` and `TARGET_REPO_NAME` are environment variables.
+               - Never query or create issues in the repository running this workflow.
+            6. Only act on high-confidence, concrete, source-backed library instrumentation gaps.
+
+            # Examples
+
+            ## Good
+
+            - A widely used official SDK for model execution in this language ecosystem has stable docs/releases and this repo does not instrument it at all.
+            - This repo instruments provider SDK A and B, but not provider SDK C with similar official generative/embeddings execution surfaces and active releases.
+            - A library with clear agent-run/tracing execution APIs is missing entirely from instrumentation coverage in this repo.
+
+            ## Bad
+
+            - Vague claims that "we may be missing some library support" without exact library, source URLs, and concrete repo evidence.
+            - Filing issues for non-execution libraries or configuration/management-only APIs.
+            - Opening multiple issues for the same library gap when one issue covers the missing instrumentation scope.
+
+            # If You Find Actionable Non-Duplicate Gaps
+
+            - Create at most ${{ matrix.max_issues }} issues in this run.
+            - Create one issue per distinct library gap.
+            - Keep each issue concise, concrete, and source-backed.
+            - Prefix every created issue title with `[BOT ISSUE] `.
+            - If the repository supports issue types, choose whichever type fits best (`Bug`, `Feature`, or `Task`). If issue types are unavailable, create the issue without type.
+            - Include a hidden marker comment near the top of the issue body in this exact form:
+
+            ```html
+            <!-- library-gap-audit: <gap_id> -->
+            ```
+
+            Each issue should clearly include:
+
+            - which library and what instrumentation is missing
+            - whether Braintrust docs suggest the capability is `supported`, `unclear`, or `not_found`
+            - exact upstream sources
+            - exact Braintrust docs source or sources
+            - exact local repo files you inspected
+
+            # Duplicate Handling
+
+            - Do not create an issue if an open issue already covers the same gap.
+            - Treat a matching hidden marker comment or a clearly equivalent open issue as a duplicate.
+            - If duplicate checking is inconclusive, do not create the issue.
+
+            # Constraints
+
+            - Discover source URLs yourself. Do not rely on a preset list.
+            - Prefer official docs and official release sources.
+            - Do not create comments.
+            - Do not update, close, or label existing issues.
+            - Do not create pull requests.
+            - If there are no high-confidence non-duplicate gaps, do nothing.
+          claude_args: |
+            --model claude-opus-4-6
+            --max-turns 200
+            --allowedTools "Read,Glob,Grep,LS,WebSearch,WebFetch,mcp__github__get_issue,mcp__github__get_issue_comments,mcp__github__search_issues,mcp__github__list_issues,mcp__github__create_issue"
+            --disallowedTools "Bash,Edit,MultiEdit,Write,Replace,NotebookEditCell,mcp__github__create_issue_comment,mcp__github__update_issue,mcp__github__create_pr,mcp__github__create_or_update_file,mcp__github__delete_file,mcp__github_file_ops__commit_files,mcp__github_file_ops__delete_files"

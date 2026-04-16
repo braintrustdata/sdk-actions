@@ -129,7 +129,7 @@ jobs:
             - Create at most ${{ matrix.max_issues }} issues in this run.
             - Create one issue per distinct gap.
             - Keep each issue concise, concrete, and source-backed.
-            - Prefix every created issue title with `[BOT ISSUE] `.
+            - Prefix every created issue title with `[bot] `.
             - If the repository supports issue types, choose whichever type fits best (`Bug`, `Feature`, or `Task`). If issue types are unavailable, create the issue without type.
             - Include a hidden marker comment near the top of the issue body in this exact form:
 

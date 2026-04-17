@@ -23,25 +23,18 @@ jobs:
         include:
           - owner: braintrustdata
             repo: braintrust-sdk-javascript
-            max_actions: 3
           - owner: braintrustdata
             repo: braintrust-sdk-python
-            max_actions: 3
           - owner: braintrustdata
             repo: braintrust-sdk-go
-            max_actions: 3
           - owner: braintrustdata
             repo: braintrust-sdk-ruby
-            max_actions: 3
           - owner: braintrustdata
             repo: braintrust-sdk-rust
-            max_actions: 3
           - owner: braintrustdata
             repo: braintrust-sdk-java
-            max_actions: 3
           - owner: braintrustdata
             repo: braintrust-sdk-dotnet
-            max_actions: 3
     steps:
       - name: Generate GitHub App token
         id: app-token
@@ -143,7 +136,7 @@ jobs:
 
             # Action Rules
 
-            - Take action on at most ${{ matrix.max_actions }} issues in this run.
+            - Take action on at most 5 issues in this run.
             - Keep comments concise and specific.
             - Every new comment you create must include a hidden marker near the top in exactly this form:
 

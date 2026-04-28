@@ -1,0 +1,196 @@
+name: Issue Revalidation Audit
+
+on:
+  schedule:
+    - cron: "0 6 1 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue-revalidation-audit-scheduled-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  revalidate-audit-issues:
+    name: Revalidate Audit Issues (${{ matrix.repo }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - owner: braintrustdata
+            repo: braintrust-sdk-javascript
+          - owner: braintrustdata
+            repo: braintrust-sdk-python
+          - owner: braintrustdata
+            repo: braintrust-sdk-go
+          - owner: braintrustdata
+            repo: braintrust-sdk-ruby
+          - owner: braintrustdata
+            repo: braintrust-sdk-rust
+          - owner: braintrustdata
+            repo: braintrust-sdk-java
+          - owner: braintrustdata
+            repo: braintrust-sdk-dotnet
+    steps:
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0
+        with:
+          app-id: ${{ secrets.BRAINTRUST_BOT_APP_ID }}
+          private-key: ${{ secrets.BRAINTRUST_BOT_PRIVATE_KEY }}
+          owner: ${{ matrix.owner }}
+          repositories: |
+            ${{ matrix.repo }}
+          permission-contents: read
+          permission-issues: write
+
+      - name: Check for open audit issues
+        id: audit-issues
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          count="$(gh api --paginate --slurp "repos/${{ matrix.owner }}/${{ matrix.repo }}/issues?state=open&per_page=100" \
+            --jq 'flatten | map(select(.pull_request | not) | select((.body // "") | contains("<!-- provider-gap-audit: ") or contains("<!-- library-gap-audit: "))) | length')"
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          if [ "$count" -gt 0 ]; then
+            echo "has_audit_issues=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_audit_issues=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        if: steps.audit-issues.outputs.has_audit_issues == 'true'
+        with:
+          repository: ${{ matrix.owner }}/${{ matrix.repo }}
+          token: ${{ steps.app-token.outputs.token }}
+          persist-credentials: false
+
+      - name: Run Claude issue revalidation audit
+        if: steps.audit-issues.outputs.has_audit_issues == 'true'
+        uses: anthropics/claude-code-action@df37d2f0760a4b5683a6e617c9325bc1a36443f6 # v1.0.75
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ steps.app-token.outputs.token }}
+          show_full_output: "true"
+          display_report: "true"
+          plugin_marketplaces: |
+            https://github.com/braintrustdata/braintrust-claude-plugin.git
+          plugins: |
+            trace-claude-code@braintrust-claude-plugin
+          settings: |
+            {
+              "env": {
+                "TARGET_REPO_OWNER": "${{ matrix.owner }}",
+                "TARGET_REPO_NAME": "${{ matrix.repo }}",
+                "TRACE_TO_BRAINTRUST": "true",
+                "BRAINTRUST_CC_PROJECT": "${{ vars.BRAINTRUST_CC_PROJECT }}",
+                "BRAINTRUST_API_KEY": "${{ secrets.BRAINTRUST_API_KEY }}"
+              }
+            }
+          prompt: |
+            # Goal
+
+            Revalidate previously opened audit issues in this repository and either close the ones that are no longer actionable with high confidence or leave a concise update comment when an issue is stale but still actionable.
+
+            # Definitions
+
+            - An audit issue is an open issue in `TARGET_REPO_OWNER/TARGET_REPO_NAME` whose body contains one of these exact marker prefixes:
+              - `<!-- provider-gap-audit: `
+              - `<!-- library-gap-audit: `
+            - A bot-created issue is an issue authored by the bot / GitHub App identity used for these automated audits, not by a human.
+            - A revalidation comment is a comment containing this exact marker prefix:
+              - `<!-- issue-revalidation-audit: `
+            - Valid classifications are:
+              - `still_valid`: the issue still accurately describes a real, open gap
+              - `resolved`: the repository now covers the gap
+              - `obsolete`: the issue is no longer actionable as written and there is no nearby actionable gap worth keeping open
+              - `outdated_but_actionable`: the issue details are stale or partially wrong, but the underlying gap still materially exists
+              - `duplicate`: another open issue now covers the same gap more accurately
+              - `inconclusive`: not enough evidence to act safely
+
+            # Scope
+
+            - Only inspect open issues in `TARGET_REPO_OWNER/TARGET_REPO_NAME`.
+            - Only inspect issues with one of the audit markers above.
+            - Only act on issues created by the bot.
+            - You may inspect local code, tests, docs, examples, and e2e scenarios in the checked-out repository.
+            - You may inspect current Braintrust docs at https://www.braintrust.dev/docs.
+            - You may inspect official upstream docs and official releases/changelogs when needed.
+
+            # Process
+
+            1. List open issues in the target repository and identify issues with the audit markers.
+            2. For each candidate, confirm the issue is bot-created before doing any deeper work.
+            3. Read the issue body and comments to understand the original claim and to detect any prior revalidation comments.
+            4. Inspect the current repository to determine whether the gap still exists.
+            5. When needed, inspect current official upstream docs/releases and current Braintrust docs.
+            6. Classify the issue as `still_valid`, `resolved`, `obsolete`, `outdated_but_actionable`, `duplicate`, or `inconclusive`.
+            7. Before leaving any new comment, decide whether a prior revalidation comment already says the same thing. If there is no materially new information, do not comment again.
+            8. If the classification is high-confidence `resolved`, `obsolete`, or `duplicate`, add one concise comment explaining the reason and then close the issue.
+            9. If the classification is high-confidence `outdated_but_actionable`, add one concise update comment and leave the issue open only when the comment adds materially new information.
+            10. Leave `still_valid` and `inconclusive` issues untouched.
+
+            # Action Rules
+
+            - Take action on at most 5 issues in this run.
+            - Keep comments concise and specific.
+            - Every new comment you create must include a hidden marker near the top in exactly this form:
+
+              ```html
+              <!-- issue-revalidation-audit: <classification> -->
+              ```
+
+            - For `resolved`, `obsolete`, and `duplicate`, comment only when you are also closing the issue.
+            - For `outdated_but_actionable`, comment without closing and explain exactly what changed and why the issue remains open.
+            - If an issue already has a revalidation comment with the same classification and there is no materially new evidence, do nothing.
+            - If an issue already has a revalidation comment and the classification has changed to `resolved`, `obsolete`, or `duplicate`, leave one final closing comment and then close the issue.
+            - If an issue already has a revalidation comment and the issue remains `outdated_but_actionable`, only leave another comment if the new comment adds materially new evidence, scope changes, or guidance.
+            - For `duplicate`, reference the surviving open issue number and close only when the overlap is clear.
+            - If duplicate detection is uncertain, do nothing.
+            - If resolution is uncertain, do nothing.
+            - If obsolescence is uncertain, do nothing.
+            - If you are unsure whether an issue is `obsolete` or `outdated_but_actionable`, prefer `outdated_but_actionable` or no action over closing.
+
+            # Good Reasons To Close
+
+            - `resolved`: the local repository now clearly implements or tests the exact capability the issue described.
+            - `obsolete`: the upstream surface was removed, deprecated into a non-actionable path, or the issue's requested gap no longer makes sense based on current official docs, and there is no materially similar actionable gap to preserve.
+            - `duplicate`: another open issue with the same underlying gap exists and is clearly the better canonical issue.
+
+            # Good Reasons To Comment Without Closing
+
+            - `outdated_but_actionable`: the issue still points at a real gap, but API names, docs links, release context, or scope details have changed enough that a reader would benefit from an update comment.
+            - `outdated_but_actionable`: the original issue overstates or slightly misstates the current gap, but the remaining actionable gap is still substantial enough to keep the issue open.
+
+            # Bad Reasons To Close
+
+            - The issue is old or inactive.
+            - The issue looks low priority.
+            - The evidence is mixed or incomplete.
+            - The gap narrowed but still materially exists.
+            - The wording is stale but the underlying issue is still real.
+            - There is only a vaguely similar open issue.
+
+            # Constraints
+
+            - For every GitHub MCP tool call (`mcp__github__list_issues`, `mcp__github__search_issues`, `mcp__github__get_issue`, `mcp__github__get_issue_comments`, `mcp__github__create_issue_comment`, `mcp__github__update_issue`), explicitly pass owner=`TARGET_REPO_OWNER` and repo=`TARGET_REPO_NAME`.
+            - Never query or modify the repository running this workflow unless it is also the target repository from the environment variables.
+            - Never create new issues.
+            - Never update issue titles or bodies.
+            - Never reopen issues.
+            - Never change labels, assignees, or milestones.
+            - When calling `mcp__github__update_issue`, only use it to close an issue. Do not pass title, body, labels, assignees, or milestone fields.
+            - Never touch human-created issues.
+            - Never touch issues without one of the audit markers.
+            - Never create repetitive or materially redundant comments.
+            - Prefer local repo evidence plus official docs/releases over inference.
+            - If there are no high-confidence actions, do nothing.
+          claude_args: |
+            --model claude-opus-4-6
+            --max-turns 120
+            --allowedTools "Read,Glob,Grep,LS,WebSearch,WebFetch,mcp__github__list_issues,mcp__github__search_issues,mcp__github__get_issue,mcp__github__get_issue_comments,mcp__github__create_issue_comment,mcp__github__update_issue"
+            --disallowedTools "Bash,Edit,MultiEdit,Write,Replace,NotebookEditCell,mcp__github__create_issue,mcp__github__create_pr,mcp__github__create_or_update_file,mcp__github__delete_file,mcp__github_file_ops__commit_files,mcp__github_file_ops__delete_files"

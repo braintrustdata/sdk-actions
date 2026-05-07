@@ -1,0 +1,152 @@
+name: Braintrust Security Audit
+
+on:
+  schedule:
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: braintrust-security-audit-scheduled-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  audit-braintrust-security:
+    name: Audit braintrust security
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Generate source repository token
+        id: source-token
+        uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0
+        with:
+          app-id: ${{ secrets.BRAINTRUST_BOT_APP_ID }}
+          private-key: ${{ secrets.BRAINTRUST_BOT_PRIVATE_KEY }}
+          owner: braintrustdata
+          repositories: |
+            braintrust
+          permission-contents: read
+
+      - name: Generate issue repository token
+        id: issue-token
+        uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0
+        with:
+          app-id: ${{ secrets.BRAINTRUST_BOT_APP_ID }}
+          private-key: ${{ secrets.BRAINTRUST_BOT_PRIVATE_KEY }}
+          owner: braintrustdata
+          repositories: |
+            braintrust-security-scan-issues
+          permission-issues: write
+
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          repository: braintrustdata/braintrust
+          token: ${{ steps.source-token.outputs.token }}
+          persist-credentials: false
+
+      - name: Run Claude security audit
+        uses: anthropics/claude-code-action@df37d2f0760a4b5683a6e617c9325bc1a36443f6 # v1.0.75
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ steps.issue-token.outputs.token }}
+          show_full_output: "true"
+          display_report: "true"
+          settings: |
+            {
+              "env": {
+                "SOURCE_REPO_OWNER": "braintrustdata",
+                "SOURCE_REPO_NAME": "braintrust",
+                "ISSUE_REPO_OWNER": "braintrustdata",
+                "ISSUE_REPO_NAME": "braintrust-security-scan-issues"
+              }
+            }
+          prompt: |
+            # Goal
+
+            Find high-confidence, actionable security vulnerabilities in the checked-out `SOURCE_REPO_OWNER/SOURCE_REPO_NAME` repository and create concise issue reports only in `ISSUE_REPO_OWNER/ISSUE_REPO_NAME`.
+
+            # Scope
+
+            - Inspect only the checked-out source repository for source-code, configuration, dependency, infrastructure-as-code, authentication, authorization, data exposure, injection, tenant isolation, cryptography, secret handling, webhook, API, and deployment security issues.
+            - Focus on vulnerabilities with a concrete affected code path, configuration, or dependency and a plausible exploit or abuse path.
+            - Treat tests, docs, examples, generated files, and scripts as supporting evidence, but do not report findings that only affect non-production examples unless they create a realistic production risk.
+            - Exclude speculative hardening ideas, broad best-practice suggestions, style issues, missing tests without a vulnerability, and purely theoretical issues without repo evidence.
+            - Do not report secret-scanning alerts or raw leaked secrets. If you encounter a secret-looking value in source, describe only the file/path and risk class without including the secret value.
+
+            # Process
+
+            1. Inspect local code, configs, tests, docs, examples, CI, deployment, and infrastructure files to understand security-relevant behavior.
+            2. Follow security-sensitive flows across trust boundaries before deciding a finding is real.
+            3. When external behavior matters, prefer official docs, official release notes, or authoritative project sources.
+            4. Search existing GitHub issues for duplicates before creating anything.
+               - Only search in `ISSUE_REPO_OWNER/ISSUE_REPO_NAME`.
+               - For every GitHub MCP tool call (`mcp__github__search_issues`, `mcp__github__list_issues`, `mcp__github__get_issue`, `mcp__github__get_issue_comments`, `mcp__github__create_issue`), explicitly pass owner=`ISSUE_REPO_OWNER` and repo=`ISSUE_REPO_NAME`. `ISSUE_REPO_OWNER` and `ISSUE_REPO_NAME` are environment variables.
+               - Never query, create, update, or comment on issues in `SOURCE_REPO_OWNER/SOURCE_REPO_NAME`.
+               - Never query, create, update, or comment on issues in the repository running this workflow.
+            5. Only create issues for high-confidence, non-duplicate vulnerabilities that a maintainer could act on from the report.
+
+            # Examples
+
+            ## Good
+
+            - An authorization check is missing on a server-side route and the inspected code shows a tenant or project boundary can be crossed.
+            - A user-controlled value reaches a shell, SQL, template, path, SSRF, or deserialization sink without adequate validation or escaping.
+            - A production deployment or infrastructure configuration grants materially broader access than the code path needs, with an exact affected file and impact.
+            - A dependency or framework behavior creates a vulnerability in this repository's concrete usage, with official or authoritative source evidence.
+
+            ## Bad
+
+            - "Consider adding rate limiting" without showing an abuse path tied to a concrete endpoint or security control.
+            - "This might be vulnerable" based only on a suspicious function name.
+            - A finding that depends on ignoring an existing validation, authorization, or environment guard.
+            - A raw secret value pasted into the issue body.
+            - Any issue created in `SOURCE_REPO_OWNER/SOURCE_REPO_NAME`.
+
+            # If You Find Actionable Non-Duplicate Vulnerabilities
+
+            - Create at most 3 issues in this run.
+            - Create one issue per distinct vulnerability.
+            - Keep each issue concise, concrete, and source-backed.
+            - Prefix every created issue title with `[bot] `.
+            - If the repository supports issue types, choose whichever type fits best (`Bug`, `Feature`, or `Task`). If issue types are unavailable, create the issue without type.
+            - Include a hidden marker comment near the top of the issue body in this exact form:
+
+            ```html
+            <!-- braintrust-security-audit: <finding_id> -->
+            ```
+
+            Each issue should clearly include:
+
+            - affected source repository: `SOURCE_REPO_OWNER/SOURCE_REPO_NAME`
+            - severity: `critical`, `high`, `medium`, or `low`
+            - affected source files and code paths inspected
+            - vulnerability summary
+            - concrete impact
+            - evidence and reasoning
+            - reproduction, exploit sketch, or abuse path when possible without harmful detail
+            - suggested fix direction
+            - exact external sources inspected, if any
+
+            # Duplicate Handling
+
+            - Do not create an issue if an open issue in `ISSUE_REPO_OWNER/ISSUE_REPO_NAME` already covers the same vulnerability.
+            - Treat a matching hidden marker comment or a clearly equivalent open issue as a duplicate.
+            - If duplicate checking is inconclusive, do not create the issue.
+
+            # Constraints
+
+            - Create issues only in `ISSUE_REPO_OWNER/ISSUE_REPO_NAME`.
+            - Do not create comments.
+            - Do not update, close, label, assign, or milestone existing issues.
+            - Do not create pull requests.
+            - Do not modify files.
+            - Do not run shell commands.
+            - Do not include raw secrets, private keys, session tokens, API keys, passwords, or exploit payloads that would materially increase risk.
+            - Prefer local repo evidence plus authoritative external sources over inference.
+            - If there are no high-confidence non-duplicate vulnerabilities, do nothing.
+          claude_args: |
+            --model claude-opus-4-6
+            --max-turns 250
+            --allowedTools "Read,Glob,Grep,LS,WebSearch,WebFetch,mcp__github__get_issue,mcp__github__get_issue_comments,mcp__github__search_issues,mcp__github__list_issues,mcp__github__create_issue"
+            --disallowedTools "Bash,Edit,MultiEdit,Write,Replace,NotebookEditCell,mcp__github__create_issue_comment,mcp__github__update_issue,mcp__github__create_pr,mcp__github__create_or_update_file,mcp__github__delete_file,mcp__github_file_ops__commit_files,mcp__github_file_ops__delete_files"

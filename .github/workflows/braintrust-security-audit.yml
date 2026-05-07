@@ -69,6 +69,7 @@ jobs:
             # Scope
 
             - Inspect only the checked-out source repository for source-code, configuration, dependency, infrastructure-as-code, authentication, authorization, data exposure, injection, tenant isolation, cryptography, secret handling, webhook, API, and deployment security issues.
+            - Assume `SOURCE_REPO_OWNER/SOURCE_REPO_NAME` is private. Other repositories in the GitHub organization may not be private.
             - Focus on vulnerabilities with a concrete affected code path, configuration, or dependency and a plausible exploit or abuse path.
             - Treat tests, docs, examples, generated files, and scripts as supporting evidence, but do not report findings that only affect non-production examples unless they create a realistic production risk.
             - Exclude speculative hardening ideas, broad best-practice suggestions, style issues, missing tests without a vulnerability, and purely theoretical issues without repo evidence.

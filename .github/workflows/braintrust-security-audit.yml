@@ -71,6 +71,7 @@ jobs:
             - Inspect only the checked-out source repository for source-code, configuration, dependency, infrastructure-as-code, authentication, authorization, data exposure, injection, tenant isolation, cryptography, secret handling, webhook, API, and deployment security issues.
             - Assume `SOURCE_REPO_OWNER/SOURCE_REPO_NAME` is private. Other repositories in the GitHub organization may not be private.
             - Focus on vulnerabilities with a concrete affected code path, configuration, or dependency and a plausible exploit or abuse path.
+            - Prioritize reporting vulnerabilities with the highest realistic likelihood of occurring in production and the highest impact if exploited.
             - Treat tests, docs, examples, generated files, and scripts as supporting evidence, but do not report findings that only affect non-production examples unless they create a realistic production risk.
             - Exclude speculative hardening ideas, broad best-practice suggestions, style issues, missing tests without a vulnerability, and purely theoretical issues without repo evidence.
             - Do not report secret-scanning alerts or raw leaked secrets. If you encounter a secret-looking value in source, describe only the file/path and risk class without including the secret value.

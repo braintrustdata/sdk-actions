@@ -14,6 +14,13 @@ inputs:
     description: "Skip tag existence failure in dry runs"
     required: false
     default: 'false'
+  release_branch:
+    description: >
+      Branch name or glob pattern considered a valid release source.
+      Defaults to 'main'. Use comma-separated values for multiple patterns
+      (e.g. 'main,v*' for repos with maintenance branches).
+    required: false
+    default: 'main'
 
 outputs:
   release_tag:
@@ -25,9 +32,9 @@ outputs:
   branch:
     description: "The branch containing the SHA"
     value: ${{ steps.validate.outputs.branch }}
-  on_main:
-    description: "Whether the SHA is on the main branch"
-    value: ${{ steps.validate.outputs.on_main }}
+  on_release_branch:
+    description: "Whether the SHA's branch matches the configured release_branch pattern"
+    value: ${{ steps.validate.outputs.on_release_branch }}
   commit_message:
     description: "The commit message at the SHA"
     value: ${{ steps.validate.outputs.commit_message }}
@@ -52,17 +59,21 @@ runs:
           fi
         fi
 
-        if git merge-base --is-ancestor HEAD origin/main 2>/dev/null; then
-          ON_MAIN=true
-        else
-          ON_MAIN=false
-        fi
+        ON_RELEASE_BRANCH=false
+        IFS=',' read -ra PATTERNS <<< "${{ inputs.release_branch }}"
+        for pattern in "${PATTERNS[@]}"; do
+          pattern=$(echo "$pattern" | xargs)
+          if [[ "$BRANCH" == $pattern ]]; then
+            ON_RELEASE_BRANCH=true
+            break
+          fi
+        done
 
         PREV_TAG=$(git describe --tags --abbrev=0 --match='v[0-9]*.[0-9]*.[0-9]*' HEAD^ 2>/dev/null || echo "")
 
         echo "release_tag=$TAG" >> $GITHUB_OUTPUT
         echo "commit_message=$COMMIT_MSG" >> $GITHUB_OUTPUT
         echo "branch=$BRANCH" >> $GITHUB_OUTPUT
-        echo "on_main=$ON_MAIN" >> $GITHUB_OUTPUT
+        echo "on_release_branch=$ON_RELEASE_BRANCH" >> $GITHUB_OUTPUT
         echo "prev_tag=$PREV_TAG" >> $GITHUB_OUTPUT
         echo "Validated $TAG @ ${{ inputs.sha }} ($COMMIT_MSG)"

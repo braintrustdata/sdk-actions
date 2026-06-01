@@ -17,7 +17,7 @@ inputs:
   branch:
     description: "Branch containing the SHA"
     required: true
-  on_main:
+  on_release_branch:
     description: "Whether the SHA is on the main branch"
     required: true
   commit_message:
@@ -37,10 +37,12 @@ inputs:
     default: 'false'
   slack_token:
     description: "Slack bot token for posting messages"
-    required: true
+    required: false
+    default: ''
   slack_channel:
     description: "Slack channel ID to post to"
-    required: true
+    required: false
+    default: ''
   emoji:
     description: "Emoji prefix for Slack messages"
     required: false
@@ -58,7 +60,7 @@ runs:
         if [ -z "$NOTES" ]; then NOTES="_Release notes unavailable._"; fi
 
         BRANCH_LABEL="[${{ inputs.branch }}]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/tree/${{ inputs.branch }})"
-        if [ "${{ inputs.on_main }}" = "false" ]; then
+        if [ "${{ inputs.on_release_branch }}" = "false" ]; then
           BRANCH_LABEL="$BRANCH_LABEL ⚠️"
         fi
 
@@ -71,9 +73,9 @@ runs:
           echo "" >> $GITHUB_STEP_SUMMARY
         fi
 
-        if [ "${{ inputs.on_main }}" = "false" ]; then
+        if [ "${{ inputs.on_release_branch }}" = "false" ]; then
           echo "> [!WARNING]" >> $GITHUB_STEP_SUMMARY
-          echo "> Release SHA is not on main: Is this a special release? (e.g. beta, backport, etc)" >> $GITHUB_STEP_SUMMARY
+          echo "> Release SHA is not on a release branch (expected: ${{ inputs.release_branch }}). Is this intentional?" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
         fi
 
@@ -97,10 +99,15 @@ runs:
         TAG: ${{ inputs.release_tag }}
         APPROVE_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
       run: |
+        if [ -z "$SLACK_BOT_TOKEN" ] || [ -z "$SLACK_CHANNEL" ]; then
+          echo "Slack not configured (slack_token or slack_channel not provided) — skipping notification."
+          exit 0
+        fi
+
         BRANCH_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/tree/${{ inputs.branch }}"
         BRANCH_LINK="<$BRANCH_URL|${{ inputs.branch }}>"
-        if [ "${{ inputs.on_main }}" = "false" ]; then
-          BRANCH_INFO="> ⚠️ NOT on main: $BRANCH_LINK"
+        if [ "${{ inputs.on_release_branch }}" = "false" ]; then
+          BRANCH_INFO="> ⚠️ NOT on release branch: $BRANCH_LINK"
         else
           BRANCH_INFO="$BRANCH_LINK"
         fi

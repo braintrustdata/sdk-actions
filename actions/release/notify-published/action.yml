@@ -1,0 +1,87 @@
+name: Notify Release Complete
+description: >
+  Posts the post-publish Slack notification with release link and PR list.
+
+inputs:
+  release_tag:
+    description: "The release tag (e.g. v0.3.2)"
+    required: true
+  prev_tag:
+    description: "Previous release tag"
+    required: false
+    default: ''
+  branch:
+    description: "Branch the release was made from"
+    required: true
+  on_main:
+    description: "Whether the release was from main"
+    required: true
+  pr_list:
+    description: "x1f-delimited PR list from prepare action"
+    required: false
+    default: ''
+  dry_run:
+    description: "Whether this was a dry run"
+    required: false
+    default: 'false'
+  slack_token:
+    description: "Slack bot token for posting messages"
+    required: true
+  slack_channel:
+    description: "Slack channel ID to post to"
+    required: true
+  emoji:
+    description: "Emoji prefix for Slack messages"
+    required: false
+    default: ':package:'
+
+runs:
+  using: composite
+  steps:
+    - name: Notify Slack
+      shell: bash
+      env:
+        SLACK_BOT_TOKEN: ${{ inputs.slack_token }}
+        SLACK_CHANNEL: ${{ inputs.slack_channel }}
+        TAG: ${{ inputs.release_tag }}
+        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      run: |
+        RELEASE_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$TAG"
+
+        DIFF_PART=""
+        if [ -n "${{ inputs.prev_tag }}" ]; then
+          DIFF_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/${{ inputs.prev_tag }}...$TAG"
+          DIFF_PART="<$DIFF_URL|${{ inputs.prev_tag }}...$TAG>  ·  "
+        fi
+
+        PR_LIST=$(echo "${{ inputs.pr_list }}" | tr $'\x1f' '\n' | sed '/^$/d')
+
+        if [ "${{ inputs.dry_run }}" = "true" ]; then
+          TEXT="${{ inputs.emoji }} *$GITHUB_REPOSITORY $TAG* complete"
+          TEXT="$TEXT\n> :information_source: _Dry run: gem built, nothing tagged or published._"
+        else
+          TEXT="${{ inputs.emoji }} *$GITHUB_REPOSITORY $TAG* published"
+        fi
+
+        if [ "${{ inputs.on_main }}" = "false" ]; then
+          BRANCH_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/tree/${{ inputs.branch }}"
+          TEXT="$TEXT\n> ⚠️ NOT on main: <$BRANCH_URL|${{ inputs.branch }}>"
+        fi
+
+        if [ "${{ inputs.dry_run }}" = "true" ]; then
+          TEXT="$TEXT\n${DIFF_PART}<$RUN_URL|View dry run>"
+        else
+          TEXT="$TEXT\n${DIFF_PART}<$RELEASE_URL|View release>"
+        fi
+
+        if [ -n "$PR_LIST" ]; then
+          TEXT="$TEXT\n$PR_LIST"
+        fi
+
+        # jq --arg passes strings literally, so \n must be real newlines before encoding
+        TEXT=$(printf '%b' "$TEXT")
+        curl -s -X POST "https://slack.com/api/chat.postMessage" \
+          -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+          -H "Content-Type: application/json; charset=utf-8" \
+          -d "$(jq -n --arg channel "$SLACK_CHANNEL" --arg text "$TEXT" \
+            '{channel: $channel, text: $text}')"

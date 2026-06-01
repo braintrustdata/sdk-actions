@@ -1,0 +1,55 @@
+name: Prepare Release
+description: >
+  Fetches release notes and formats the PR list for notifications.
+  Requires contents:write permission on the calling job (for generate-notes API).
+
+inputs:
+  release_tag:
+    description: "The release tag (e.g. v0.3.2)"
+    required: true
+  sha:
+    description: "The commit SHA being released"
+    required: true
+  prev_tag:
+    description: "The previous release tag"
+    required: false
+    default: ''
+
+outputs:
+  pr_list:
+    description: "Formatted PR list (x1f-delimited for safe job output passing)"
+    value: ${{ steps.fetch.outputs.pr_list }}
+  notes:
+    description: "Base64-encoded full release notes body"
+    value: ${{ steps.fetch.outputs.notes }}
+
+runs:
+  using: composite
+  steps:
+    - name: Fetch PR list and release notes
+      id: fetch
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        PREV_TAG="${{ inputs.prev_tag }}"
+        BODY=$(gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
+          --method POST \
+          --field tag_name="${{ inputs.release_tag }}" \
+          --field target_commitish="${{ inputs.sha }}" \
+          ${PREV_TAG:+--field previous_tag_name="$PREV_TAG"} \
+          --jq '.body' 2>/dev/null || echo "")
+
+        PR_LIST=$(echo "$BODY" \
+          | grep "^\* " \
+          | grep -v "made their first contribution" \
+          | grep -v "Full Changelog" \
+          | head -10 \
+          | sed 's|^\* ||' \
+          | sed 's| by @[^ ]*||' \
+          | sed 's@ in \(https://[^ ]*/pull/\([0-9]*\)\)@ (<\1|#\2>)@' \
+          | sed 's/^/• /' \
+          | tr '\n' $'\x1f' || echo "")
+
+        echo "pr_list=$PR_LIST" >> $GITHUB_OUTPUT
+        echo "notes=$(echo "$BODY" | base64 -w 0)" >> $GITHUB_OUTPUT

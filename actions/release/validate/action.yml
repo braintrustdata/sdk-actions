@@ -1,0 +1,68 @@
+name: Validate Release
+description: >
+  Validates a release SHA and computes release metadata.
+  Requires the repository to be checked out at the target SHA.
+
+inputs:
+  version:
+    description: "Version string read from the language-specific version file"
+    required: true
+  sha:
+    description: "Commit SHA being released"
+    required: true
+  dry_run:
+    description: "Skip tag existence failure in dry runs"
+    required: false
+    default: 'false'
+
+outputs:
+  release_tag:
+    description: "The release tag (e.g. v0.3.2)"
+    value: ${{ steps.validate.outputs.release_tag }}
+  prev_tag:
+    description: "The previous release tag"
+    value: ${{ steps.validate.outputs.prev_tag }}
+  branch:
+    description: "The branch containing the SHA"
+    value: ${{ steps.validate.outputs.branch }}
+  on_main:
+    description: "Whether the SHA is on the main branch"
+    value: ${{ steps.validate.outputs.on_main }}
+  commit_message:
+    description: "The commit message at the SHA"
+    value: ${{ steps.validate.outputs.commit_message }}
+
+runs:
+  using: composite
+  steps:
+    - name: Validate release
+      id: validate
+      shell: bash
+      run: |
+        TAG="v${{ inputs.version }}"
+        COMMIT_MSG=$(git log -1 --format="%s" HEAD)
+        BRANCH=$(git branch -r --contains HEAD --format="%(refname:short)" | sed 's|origin/||' | head -1)
+
+        if git rev-parse "$TAG" >/dev/null 2>&1; then
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            echo "Warning: Tag $TAG already exists — skipping in dry run"
+          else
+            echo "Error: Tag $TAG already exists — has the version been bumped?"
+            exit 1
+          fi
+        fi
+
+        if git merge-base --is-ancestor HEAD origin/main 2>/dev/null; then
+          ON_MAIN=true
+        else
+          ON_MAIN=false
+        fi
+
+        PREV_TAG=$(git describe --tags --abbrev=0 --match='v[0-9]*.[0-9]*.[0-9]*' HEAD^ 2>/dev/null || echo "")
+
+        echo "release_tag=$TAG" >> $GITHUB_OUTPUT
+        echo "commit_message=$COMMIT_MSG" >> $GITHUB_OUTPUT
+        echo "branch=$BRANCH" >> $GITHUB_OUTPUT
+        echo "on_main=$ON_MAIN" >> $GITHUB_OUTPUT
+        echo "prev_tag=$PREV_TAG" >> $GITHUB_OUTPUT
+        echo "Validated $TAG @ ${{ inputs.sha }} ($COMMIT_MSG)"

@@ -1,0 +1,136 @@
+name: Notify Release Pending
+description: >
+  Posts the pre-approval job summary and Slack notification.
+  Called before the environment gate — reviewer sees this before approving.
+
+inputs:
+  sha:
+    description: "Commit SHA being released"
+    required: true
+  release_tag:
+    description: "The release tag (e.g. v0.3.2)"
+    required: true
+  prev_tag:
+    description: "Previous release tag"
+    required: false
+    default: ''
+  branch:
+    description: "Branch containing the SHA"
+    required: true
+  on_main:
+    description: "Whether the SHA is on the main branch"
+    required: true
+  commit_message:
+    description: "Commit message at the SHA"
+    required: true
+  pr_list:
+    description: "x1f-delimited PR list from prepare action"
+    required: false
+    default: ''
+  notes:
+    description: "Base64-encoded release notes from prepare action"
+    required: false
+    default: ''
+  dry_run:
+    description: "Whether this is a dry run"
+    required: false
+    default: 'false'
+  slack_token:
+    description: "Slack bot token for posting messages"
+    required: true
+  slack_channel:
+    description: "Slack channel ID to post to"
+    required: true
+  emoji:
+    description: "Emoji prefix for Slack messages"
+    required: false
+    default: ':package:'
+
+runs:
+  using: composite
+  steps:
+    - name: Post release summary
+      shell: bash
+      env:
+        TAG: ${{ inputs.release_tag }}
+      run: |
+        NOTES=$(echo "${{ inputs.notes }}" | base64 -d 2>/dev/null)
+        if [ -z "$NOTES" ]; then NOTES="_Release notes unavailable._"; fi
+
+        BRANCH_LABEL="[${{ inputs.branch }}]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/tree/${{ inputs.branch }})"
+        if [ "${{ inputs.on_main }}" = "false" ]; then
+          BRANCH_LABEL="$BRANCH_LABEL ⚠️"
+        fi
+
+        echo "## $GITHUB_REPOSITORY $TAG" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+
+        if [ "${{ inputs.dry_run }}" = "true" ]; then
+          echo "> [!NOTE]" >> $GITHUB_STEP_SUMMARY
+          echo "> Dry run: Nothing will be tagged or published." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+        fi
+
+        if [ "${{ inputs.on_main }}" = "false" ]; then
+          echo "> [!WARNING]" >> $GITHUB_STEP_SUMMARY
+          echo "> Release SHA is not on main: Is this a special release? (e.g. beta, backport, etc)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+        fi
+
+        echo "**SHA:** [${{ inputs.sha }}]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/commit/${{ inputs.sha }})" >> $GITHUB_STEP_SUMMARY
+        echo "**Commit:** ${{ inputs.commit_message }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Branch:** $BRANCH_LABEL" >> $GITHUB_STEP_SUMMARY
+
+        if [ -n "${{ inputs.prev_tag }}" ]; then
+          DIFF_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/${{ inputs.prev_tag }}...${{ inputs.sha }}"
+          echo "**Diff:** [${{ inputs.prev_tag }}...$TAG]($DIFF_URL)" >> $GITHUB_STEP_SUMMARY
+        fi
+
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "$NOTES" >> $GITHUB_STEP_SUMMARY
+
+    - name: Notify Slack
+      shell: bash
+      env:
+        SLACK_BOT_TOKEN: ${{ inputs.slack_token }}
+        SLACK_CHANNEL: ${{ inputs.slack_channel }}
+        TAG: ${{ inputs.release_tag }}
+        APPROVE_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      run: |
+        BRANCH_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/tree/${{ inputs.branch }}"
+        BRANCH_LINK="<$BRANCH_URL|${{ inputs.branch }}>"
+        if [ "${{ inputs.on_main }}" = "false" ]; then
+          BRANCH_INFO="> ⚠️ NOT on main: $BRANCH_LINK"
+        else
+          BRANCH_INFO="$BRANCH_LINK"
+        fi
+
+        DIFF_PART=""
+        if [ -n "${{ inputs.prev_tag }}" ]; then
+          DIFF_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/${{ inputs.prev_tag }}...${{ inputs.sha }}"
+          DIFF_PART=" · <$DIFF_URL|${{ inputs.prev_tag }}...$TAG>"
+        fi
+
+        PR_LIST=$(echo "${{ inputs.pr_list }}" | tr $'\x1f' '\n' | sed '/^$/d')
+
+        TEXT="${{ inputs.emoji }} *$GITHUB_REPOSITORY $TAG* awaiting approval"
+
+        if [ "${{ inputs.dry_run }}" = "true" ]; then
+          TEXT="$TEXT\n> :information_source: _Dry run: nothing will be tagged or published._"
+        fi
+
+        TEXT="$TEXT\n${BRANCH_INFO}${DIFF_PART}"
+
+        if [ -n "$PR_LIST" ]; then
+          TEXT="$TEXT\n$PR_LIST"
+        fi
+
+        TEXT="$TEXT\n<$APPROVE_URL|View changes & approve>"
+
+        # jq --arg passes strings literally, so \n must be real newlines before encoding
+        TEXT=$(printf '%b' "$TEXT")
+        curl -s -X POST "https://slack.com/api/chat.postMessage" \
+          -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+          -H "Content-Type: application/json; charset=utf-8" \
+          -d "$(jq -n --arg channel "$SLACK_CHANNEL" --arg text "$TEXT" \
+            '{channel: $channel, text: $text}')"

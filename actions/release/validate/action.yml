@@ -42,6 +42,14 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Validate SHA format
+      shell: bash
+      run: |
+        if ! echo "${{ inputs.sha }}" | grep -qE '^[0-9a-f]{40}$'; then
+          echo "Error: sha must be a full 40-character commit SHA — branch names and short SHAs are not accepted."
+          exit 1
+        fi
+
     - name: Validate release
       id: validate
       shell: bash

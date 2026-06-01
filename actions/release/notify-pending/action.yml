@@ -55,6 +55,7 @@ runs:
       shell: bash
       env:
         TAG: ${{ inputs.release_tag }}
+        COMMIT_MSG: ${{ inputs.commit_message }}
       run: |
         NOTES=$(echo "${{ inputs.notes }}" | base64 -d 2>/dev/null)
         if [ -z "$NOTES" ]; then NOTES="_Release notes unavailable._"; fi
@@ -80,7 +81,7 @@ runs:
         fi
 
         echo "**SHA:** [${{ inputs.sha }}]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/commit/${{ inputs.sha }})" >> $GITHUB_STEP_SUMMARY
-        echo "**Commit:** ${{ inputs.commit_message }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Commit:** $COMMIT_MSG" >> $GITHUB_STEP_SUMMARY
         echo "**Branch:** $BRANCH_LABEL" >> $GITHUB_STEP_SUMMARY
 
         if [ -n "${{ inputs.prev_tag }}" ]; then
@@ -98,6 +99,7 @@ runs:
         SLACK_CHANNEL: ${{ inputs.slack_channel }}
         TAG: ${{ inputs.release_tag }}
         APPROVE_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        PR_LIST_RAW: ${{ inputs.pr_list }}
       run: |
         if [ -z "$SLACK_BOT_TOKEN" ] || [ -z "$SLACK_CHANNEL" ]; then
           echo "Slack not configured (slack_token or slack_channel not provided) — skipping notification."
@@ -118,7 +120,7 @@ runs:
           DIFF_PART=" · <$DIFF_URL|${{ inputs.prev_tag }}...$TAG>"
         fi
 
-        PR_LIST=$(echo "${{ inputs.pr_list }}" | tr $'\x1f' '\n' | sed '/^$/d')
+        PR_LIST=$(echo "$PR_LIST_RAW" | tr $'\x1f' '\n' | sed '/^$/d')
 
         TEXT="${{ inputs.emoji }} *$GITHUB_REPOSITORY $TAG* awaiting approval"
 

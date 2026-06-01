@@ -47,6 +47,7 @@ runs:
         SLACK_CHANNEL: ${{ inputs.slack_channel }}
         TAG: ${{ inputs.release_tag }}
         RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        PR_LIST_RAW: ${{ inputs.pr_list }}
       run: |
         if [ -z "$SLACK_BOT_TOKEN" ] || [ -z "$SLACK_CHANNEL" ]; then
           echo "Slack not configured (slack_token or slack_channel not provided) — skipping notification."
@@ -61,7 +62,7 @@ runs:
           DIFF_PART="<$DIFF_URL|${{ inputs.prev_tag }}...$TAG>  ·  "
         fi
 
-        PR_LIST=$(echo "${{ inputs.pr_list }}" | tr $'\x1f' '\n' | sed '/^$/d')
+        PR_LIST=$(echo "$PR_LIST_RAW" | tr $'\x1f' '\n' | sed '/^$/d')
 
         if [ "${{ inputs.dry_run }}" = "true" ]; then
           TEXT="${{ inputs.emoji }} *$GITHUB_REPOSITORY $TAG* complete"

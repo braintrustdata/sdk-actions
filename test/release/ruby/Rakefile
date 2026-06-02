@@ -1,0 +1,46 @@
+# frozen_string_literal: true
+
+require "rake/testtask"
+
+desc "Run StandardRB linter"
+task :lint do
+  sh "bundle exec standardrb"
+end
+
+desc "Build gem into pkg/"
+task :build do
+  sh "gem build bt-fake.gemspec --output pkg/bt-fake-$(ruby -r './lib/bt_fake/version' -e 'print BtFake::VERSION').gem"
+end
+
+namespace :release do
+  task publish: [:lint, :build] do
+    gem_files = FileList["pkg/bt-fake-*.gem"]
+    raise "No gem file found after build" if gem_files.empty?
+
+    if ENV["DRY_RUN"] == "true"
+      puts "DRY RUN: would push #{gem_files.first} to RubyGems (skipped)"
+    else
+      sh "gem push #{gem_files.first}"
+      puts "✓ Gem pushed to RubyGems"
+    end
+  end
+
+  task :push_tag do
+    require_relative "lib/bt_fake/version"
+    tag = "v#{BtFake::VERSION}"
+    if ENV["DRY_RUN"] == "true"
+      puts "DRY RUN: would push tag #{tag} to origin (skipped)"
+    else
+      sh "git tag #{tag}"
+      sh "git push origin #{tag}"
+      puts "✓ Tag #{tag} pushed"
+    end
+  end
+end
+
+# Called by rubygems/release-gem in the release workflow.
+# Follows Bundler convention: build, push gem, push tag.
+# GitHub release creation is handled separately by the workflow.
+task release: ["release:publish", "release:push_tag"] do
+  puts "✓ Release complete"
+end

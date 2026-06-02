@@ -1,0 +1,40 @@
+name: Publish Ruby Gem
+description: >
+  Sets up Ruby and publishes a gem to RubyGems with OIDC trusted publishing
+  and SLSA attestation via rubygems/release-gem. Reads DRY_RUN from the
+  environment — set DRY_RUN=true to lint and build without pushing.
+
+inputs:
+  working-directory:
+    description: "Path to the gem root (where the Gemfile and gemspec live)"
+    required: false
+    default: '.'
+  ruby-version:
+    description: "Ruby version to use (defaults to .ruby-version file if present)"
+    required: false
+    default: '3.4'
+  dry_run:
+    description: "Skip gem push and tag push"
+    required: false
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Ruby
+      uses: ruby/setup-ruby@afeafc3d1ab54a631816aba4c914a0081c12ff2f # v1.310.0
+      with:
+        ruby-version: ${{ inputs.ruby-version }}
+        bundler-cache: true
+        working-directory: ${{ inputs.working-directory }}
+
+    - name: Publish gem with attestation
+      uses: rubygems/release-gem@6317d8d1f7e28c24d28f6eff169ea854948bd9f7 # v1.2.0
+      with:
+        await-release: ${{ inputs.dry_run == 'true' && 'false' || 'true' }}
+        setup-trusted-publisher: ${{ inputs.dry_run == 'true' && 'false' || 'true' }}
+        attestations: ${{ inputs.dry_run == 'true' && 'false' || 'true' }}
+        working-directory: ${{ inputs.working-directory }}
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+        DRY_RUN: ${{ inputs.dry_run }}

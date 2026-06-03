@@ -39,8 +39,8 @@ namespace :release do
 end
 
 # Called by rubygems/release-gem in the release workflow.
-# Follows Bundler convention: build, push gem, push tag.
-# GitHub release creation is handled separately by the workflow.
-task release: ["release:publish", "release:push_tag"] do
+# bt-fake: tag push omitted to avoid tag pollution from repeated test runs.
+# In real SDK workflows, include "release:push_tag" here.
+task release: ["release:publish"] do
   puts "✓ Release complete"
 end

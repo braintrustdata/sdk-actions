@@ -122,6 +122,11 @@ jobs:
       pr_list: ${{ steps.prepare.outputs.pr_list }}
       notes: ${{ steps.prepare.outputs.notes }}
     steps:
+      # bt-fake: checkout required because actions are referenced locally (./actions/...).
+      # Real SDK workflows reference actions externally (braintrustdata/sdk-actions/...@sha)
+      # and do not need this step.
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
       - name: Prepare release
         id: prepare
         uses: ./actions/release/prepare
@@ -136,6 +141,9 @@ jobs:
     timeout-minutes: 5
     permissions: {}
     steps:
+      # bt-fake: checkout required for local action resolution (see prepare job comment)
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
       - name: Notify release pending
         uses: ./actions/release/notify-pending
         with:
@@ -181,13 +189,15 @@ jobs:
           working-directory: test/release/ruby
           dry_run: ${{ inputs.dry_run }}
 
-      - name: Create GitHub release
-        uses: ./actions/release/create-github-release
-        with:
-          release_tag: ${{ needs.validate.outputs.release_tag }}
-          sha: ${{ inputs.sha }}
-          notes: ${{ needs.prepare.outputs.notes }}
-          dry_run: ${{ inputs.dry_run }}
+      # bt-fake: GitHub release creation disabled to avoid tag/release pollution
+      # from repeated test runs. In real SDK workflows, uncomment this step.
+      # - name: Create GitHub release
+      #   uses: ./actions/release/create-github-release
+      #   with:
+      #     release_tag: ${{ needs.validate.outputs.release_tag }}
+      #     sha: ${{ inputs.sha }}
+      #     notes: ${{ needs.prepare.outputs.notes }}
+      #     dry_run: ${{ inputs.dry_run }}
 
       - name: Notify release complete
         uses: ./actions/release/notify-published

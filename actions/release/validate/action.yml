@@ -14,6 +14,13 @@ inputs:
     description: "Skip tag existence failure in dry runs"
     required: false
     default: 'false'
+  tag_format:
+    description: >
+      Format string for the git tag. Use {version} as the placeholder.
+      Defaults to 'v{version}' (e.g. v0.3.2). Override for SDKs or test
+      packages with different conventions (e.g. 'py-sdk-v{version}').
+    required: false
+    default: 'v{version}'
   release_branch:
     description: >
       Branch name or glob pattern considered a valid release source.
@@ -54,7 +61,9 @@ runs:
       id: validate
       shell: bash
       run: |
-        TAG="v${{ inputs.version }}"
+        VERSION="${{ inputs.version }}"
+        TAG="${{ inputs.tag_format }}"
+        TAG="${TAG//\{version\}/$VERSION}"
         COMMIT_MSG=$(git log -1 --format="%s" HEAD)
         BRANCH=$(git branch -r --contains HEAD --format="%(refname:short)" | sed 's|origin/||' | head -1)
 

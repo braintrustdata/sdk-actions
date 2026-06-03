@@ -6,7 +6,7 @@ inputs:
   release_tag:
     description: "The release tag (e.g. v0.3.2)"
     required: true
-  prev_tag:
+  prev_release:
     description: "Previous release tag"
     required: false
     default: ''
@@ -57,9 +57,9 @@ runs:
         RELEASE_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$TAG"
 
         DIFF_PART=""
-        if [ -n "${{ inputs.prev_tag }}" ]; then
-          DIFF_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/${{ inputs.prev_tag }}...$TAG"
-          DIFF_PART="<$DIFF_URL|${{ inputs.prev_tag }}...$TAG>  ·  "
+        if [ -n "${{ inputs.prev_release }}" ]; then
+          DIFF_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/${{ inputs.prev_release }}...$TAG"
+          DIFF_PART="<$DIFF_URL|${{ inputs.prev_release }}...$TAG>  ·  "
         fi
 
         PR_LIST=$(echo "$PR_LIST_RAW" | tr $'\x1f' '\n' | sed '/^$/d')

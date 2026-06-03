@@ -52,6 +52,13 @@ on:
         description: "Commit SHA (of the version bump) to release"
         required: true
         type: string
+      prev_release:
+        description: "Anchor for release notes: a tag name or commit SHA. If SHA, notes will be empty."
+        type: string
+        required: false
+        # bt-fake: fixed SHA anchor prevents indefinite changelog accumulation.
+        # Update this when you want to reset the notes baseline.
+        default: '58a397193105516446c3042361913655bcece509'
       dry_run:
         description: "Dry run: Build without tagging or publishing"
         type: boolean
@@ -79,7 +86,7 @@ jobs:
       contents: read
     outputs:
       release_tag: ${{ steps.validate-release.outputs.release_tag }}
-      prev_tag: ${{ steps.validate-release.outputs.prev_tag }}
+      prev_release: ${{ steps.validate-release.outputs.prev_release }}
       branch: ${{ steps.validate-release.outputs.branch }}
       on_release_branch: ${{ steps.validate-release.outputs.on_release_branch }}
       commit_message: ${{ steps.validate-release.outputs.commit_message }}
@@ -133,7 +140,7 @@ jobs:
         with:
           release_tag: ${{ needs.validate.outputs.release_tag }}
           sha: ${{ inputs.sha }}
-          prev_tag: ${{ needs.validate.outputs.prev_tag }}
+          prev_release: ${{ inputs.prev_release || needs.validate.outputs.prev_release }}
 
   notify-pending:
     needs: [validate, prepare]
@@ -149,7 +156,7 @@ jobs:
         with:
           sha: ${{ inputs.sha }}
           release_tag: ${{ needs.validate.outputs.release_tag }}
-          prev_tag: ${{ needs.validate.outputs.prev_tag }}
+          prev_release: ${{ needs.validate.outputs.prev_release }}
           branch: ${{ needs.validate.outputs.branch }}
           on_release_branch: ${{ needs.validate.outputs.on_release_branch }}
           commit_message: ${{ needs.validate.outputs.commit_message }}
@@ -158,6 +165,7 @@ jobs:
           dry_run: ${{ inputs.dry_run }}
           slack_token: ${{ secrets.SLACK_BOT_TOKEN }}
           slack_channel: ${{ vars.SLACK_SDK_RELEASE_CHANNEL }}
+          emoji: ':ruby:'
 
   publish:
     needs: [bump, validate, prepare, notify-pending]
@@ -173,14 +181,16 @@ jobs:
           ref: ${{ inputs.sha }}
           fetch-depth: 0
 
-      # bt-fake: write the run-number version into version.rb before building.
-      # The publish job checks out fresh, so version.rb still has the placeholder.
-      # Real SDK workflows omit this — version.rb is already correct from the bump PR.
-      - name: Apply version to version.rb
+      # bt-fake: update both version.rb and Gemfile.lock to the run-number version.
+      # The publish job checks out fresh so both files still reflect the placeholder.
+      # Real SDK workflows omit this — both files are committed together in the bump PR.
+      - name: Apply version to version.rb and Gemfile.lock
         run: |
           VERSION="${{ needs.bump.outputs.version }}"
           sed -i "s|VERSION = \".*\"|VERSION = \"$VERSION\"|" \
             test/release/ruby/lib/bt_fake/version.rb
+          sed -i "s|bt-fake ([0-9]*\.[0-9]*\.[0-9]*)|bt-fake ($VERSION)|" \
+            test/release/ruby/Gemfile.lock
 
       # Update working-directory to your gem's root
       - name: Publish gem
@@ -203,10 +213,11 @@ jobs:
         uses: ./actions/release/notify-published
         with:
           release_tag: ${{ needs.validate.outputs.release_tag }}
-          prev_tag: ${{ needs.validate.outputs.prev_tag }}
+          prev_release: ${{ needs.validate.outputs.prev_release }}
           branch: ${{ needs.validate.outputs.branch }}
           on_release_branch: ${{ needs.validate.outputs.on_release_branch }}
           pr_list: ${{ needs.prepare.outputs.pr_list }}
           dry_run: ${{ inputs.dry_run }}
           slack_token: ${{ secrets.SLACK_BOT_TOKEN }}
           slack_channel: ${{ vars.SLACK_SDK_RELEASE_CHANNEL }}
+          emoji: ':white_check_mark:'

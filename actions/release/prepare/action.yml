@@ -10,8 +10,12 @@ inputs:
   sha:
     description: "The commit SHA being released"
     required: true
-  prev_tag:
-    description: "The previous release tag"
+  prev_release:
+    description: >
+      Anchor for release notes. Accepts a tag name or a full commit SHA.
+      If a tag: generates notes via the GitHub API using it as the previous release.
+      If a SHA: notes are unavailable (no reliable cross-strategy PR extraction);
+      outputs will be empty. If omitted, GitHub auto-detects the previous release.
     required: false
     default: ''
 
@@ -31,13 +35,21 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
+        PREV_RELEASE: ${{ inputs.prev_release }}
       run: |
-        PREV_TAG="${{ inputs.prev_tag }}"
+        # If prev_release is a full SHA, notes are unavailable
+        if echo "$PREV_RELEASE" | grep -qE '^[0-9a-f]{40}$'; then
+          echo "SHA provided for prev_release — notes unavailable for SHA ranges."
+          echo "pr_list=" >> $GITHUB_OUTPUT
+          echo "notes=$(echo "" | base64 -w 0)" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+
         BODY=$(gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
           --method POST \
           --field tag_name="${{ inputs.release_tag }}" \
           --field target_commitish="${{ inputs.sha }}" \
-          ${PREV_TAG:+--field previous_tag_name="$PREV_TAG"} \
+          ${PREV_RELEASE:+--field previous_tag_name="$PREV_RELEASE"} \
           --jq '.body' 2>/dev/null || echo "")
 
         PR_LIST=$(echo "$BODY" \

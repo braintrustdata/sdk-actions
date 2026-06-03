@@ -9,7 +9,10 @@ end
 
 desc "Build gem into pkg/"
 task :build do
-  sh "gem build bt-fake.gemspec --output pkg/bt-fake-$(ruby -r './lib/bt_fake/version' -e 'print BtFake::VERSION').gem"
+  require_relative "lib/bt_fake/version"
+  sh "gem build bt-fake.gemspec"
+  mkdir_p "pkg"
+  mv "bt-fake-#{BtFake::VERSION}.gem", "pkg/"
 end
 
 namespace :release do

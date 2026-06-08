@@ -104,6 +104,11 @@ jobs:
       on_release_branch: ${{ steps.validate-release.outputs.on_release_branch }}
       commit_message: ${{ steps.validate-release.outputs.commit_message }}
     steps:
+      # bt-fake: checkout required to resolve local ./actions/... references.
+      # Real SDK workflows use external braintrustdata/sdk-actions/...@sha references
+      # and do not need this step.
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
       - name: Validate release
         id: validate-release
         uses: ./actions/release/ruby/validate

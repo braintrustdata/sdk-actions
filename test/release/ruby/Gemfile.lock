@@ -2,6 +2,7 @@ PATH
   remote: .
   specs:
     bt-fake (0.0.1)
+      openssl (>= 3.3.1, < 5.0)
 
 GEM
   remote: https://rubygems.org/
@@ -10,6 +11,7 @@ GEM
     json (2.19.7)
     language_server-protocol (3.17.0.5)
     lint_roller (1.1.0)
+    openssl (4.0.2)
     parallel (1.28.0)
     parser (3.3.11.1)
       ast (~> 2.4.1)

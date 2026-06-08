@@ -13,4 +13,8 @@ Gem::Specification.new do |spec|
 
   spec.files = Dir.glob("lib/**/*.rb")
   spec.require_paths = ["lib"]
+
+  # Added to reproduce openssl activation conflict for CI testing.
+  # Mirrors the constraint in braintrust.gemspec.
+  spec.add_runtime_dependency "openssl", ">= 3.3.1", "< 5.0"
 end

@@ -91,33 +91,18 @@ jobs:
       on_release_branch: ${{ steps.validate-release.outputs.on_release_branch }}
       commit_message: ${{ steps.validate-release.outputs.commit_message }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: ${{ inputs.sha }}
-          fetch-depth: 0
-
-      # Update working-directory to your gem's root
-      - name: Set up language runtime
-        uses: ruby/setup-ruby@afeafc3d1ab54a631816aba4c914a0081c12ff2f # v1.310.0
-        with:
-          ruby-version: '3.4'
-          bundler-cache: true
-          working-directory: test/release/ruby
-
-      # bt-fake: sources from the bump job instead of a version file.
-      # In a real Ruby project: replace with the path to your version.rb and module name.
-      # e.g. ruby -r "./lib/your_gem/version.rb" -e "puts YourGem::VERSION"
-      - name: Read version
-        id: read-version
-        run: echo "version=${{ needs.bump.outputs.version }}" >> $GITHUB_OUTPUT
-
       - name: Validate release
         id: validate-release
-        uses: ./actions/release/validate
+        uses: ./actions/release/ruby/validate
         with:
-          version: ${{ steps.read-version.outputs.version }}
+          # bt-fake: version passed directly from bump job — no version file needed.
+          # In a real Ruby project, replace `version` with:
+          #   version_file: lib/your_gem/version.rb
+          #   version_module: YourGem
+          version: ${{ needs.bump.outputs.version }}
           sha: ${{ inputs.sha }}
           dry_run: ${{ inputs.dry_run }}
+          working_directory: test/release/ruby
 
   prepare:
     needs: validate

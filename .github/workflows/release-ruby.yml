@@ -74,6 +74,19 @@ jobs:
     steps:
       # bt-fake: generates a version from the run number — no version bump PR needed.
       # Remove this job in real SDK workflows; version comes from the version bump PR.
+      - name: Probe Ruby environment
+        uses: ruby/setup-ruby@afeafc3d1ab54a631816aba4c914a0081c12ff2f # v1.310.0
+        with:
+          ruby-version: '4.0'
+
+      - name: Probe Ruby environment
+        run: |
+          ruby --version
+          echo "Default openssl gem:"
+          ruby -e "puts Gem::Specification.find_by_name('openssl').version rescue 'not found'"
+          echo "All openssl gems:"
+          gem list openssl
+
       - name: Bump version
         id: bump
         run: echo "version=0.0.${{ github.run_number }}" >> $GITHUB_OUTPUT

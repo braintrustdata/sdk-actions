@@ -10,9 +10,9 @@ inputs:
     required: false
     default: '.'
   ruby-version:
-    description: "Ruby version to use (defaults to .ruby-version file if present)"
+    description: "Ruby version to use"
     required: false
-    default: '3.4'
+    default: '4.0'
   dry_run:
     description: "Skip gem push and tag push"
     required: false

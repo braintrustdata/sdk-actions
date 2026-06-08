@@ -94,4 +94,10 @@ runs:
     - name: Lint and build
       shell: bash
       working-directory: ${{ inputs.working_directory }}
+      env:
+        # Simulate rubygems/release-gem's RUBYOPT injection, which pre-loads gems
+        # (including openssl for attestation) before bundle exec runs. This exposes
+        # default gem activation conflicts that would otherwise only appear at publish
+        # time — catching them here before the approval gate.
+        RUBYOPT: "-r openssl"
       run: bundle exec rake lint build

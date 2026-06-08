@@ -4,5 +4,9 @@ source "https://rubygems.org"
 
 gemspec
 
+# Pin openssl to Ruby 4.0's bundled default (4.0.0) to avoid bundler activation
+# conflicts with RUBYOPT pre-loading. Update when ruby_version bumps.
+gem "openssl", "4.0.0"
+
 gem "rake", "~> 13.0"
 gem "standard", "~> 1.0"

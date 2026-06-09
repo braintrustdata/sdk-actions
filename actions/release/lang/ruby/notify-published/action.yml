@@ -1,0 +1,74 @@
+name: Notify Ruby Gem Release Complete
+description: >
+  Ruby-specific wrapper around notify-published. Builds a links JSON array
+  containing the RubyGems entry, then delegates to the generic action.
+
+inputs:
+  release_tag:
+    description: "The release tag (e.g. v0.3.2)"
+    required: true
+  prev_release:
+    description: "Previous release tag"
+    required: false
+    default: ''
+  branch:
+    description: "Branch the release was made from"
+    required: true
+  on_release_branch:
+    description: "Whether the release was from an expected release branch"
+    required: true
+  pr_list:
+    description: "x1f-delimited PR list from prepare action"
+    required: false
+    default: ''
+  dry_run:
+    description: "Whether this was a dry run"
+    required: false
+    default: 'false'
+  slack_token:
+    description: "Slack bot token"
+    required: false
+    default: ''
+  slack_channel:
+    description: "Slack channel ID"
+    required: false
+    default: ''
+  emoji:
+    description: "Emoji prefix for Slack messages"
+    required: false
+    default: ':white_check_mark:'
+  gem_name:
+    description: "RubyGems gem name (e.g. braintrust). Used to build the RubyGems link."
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Build links
+      id: links
+      shell: bash
+      env:
+        GEM_NAME: ${{ inputs.gem_name }}
+        RELEASE_TAG: ${{ inputs.release_tag }}
+        DRY_RUN: ${{ inputs.dry_run }}
+      run: |
+        LINKS='[]'
+        if [ "$DRY_RUN" != "true" ] && [ -n "$GEM_NAME" ]; then
+          VERSION="${RELEASE_TAG#v}"
+          LINKS="[{\"label\":\"RubyGems\",\"url\":\"https://rubygems.org/gems/$GEM_NAME/versions/$VERSION\"}]"
+        fi
+        echo "links=$LINKS" >> $GITHUB_OUTPUT
+
+    - uses: ./actions/release/notify-published
+      with:
+        release_tag: ${{ inputs.release_tag }}
+        prev_release: ${{ inputs.prev_release }}
+        branch: ${{ inputs.branch }}
+        on_release_branch: ${{ inputs.on_release_branch }}
+        pr_list: ${{ inputs.pr_list }}
+        dry_run: ${{ inputs.dry_run }}
+        slack_token: ${{ inputs.slack_token }}
+        slack_channel: ${{ inputs.slack_channel }}
+        emoji: ${{ inputs.emoji }}
+        links: ${{ steps.links.outputs.links }}

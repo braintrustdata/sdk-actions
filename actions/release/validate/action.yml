@@ -51,8 +51,10 @@ runs:
   steps:
     - name: Validate SHA format
       shell: bash
+      env:
+        SHA: ${{ inputs.sha }}
       run: |
-        if ! echo "${{ inputs.sha }}" | grep -qE '^[0-9a-f]{40}$'; then
+        if ! echo "$SHA" | grep -qE '^[0-9a-f]{40}$'; then
           echo "Error: sha must be a full 40-character commit SHA — branch names and short SHAs are not accepted."
           exit 1
         fi
@@ -60,15 +62,19 @@ runs:
     - name: Validate release
       id: validate
       shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+        TAG_FORMAT: ${{ inputs.tag_format }}
+        DRY_RUN: ${{ inputs.dry_run }}
+        RELEASE_BRANCH: ${{ inputs.release_branch }}
+        SHA: ${{ inputs.sha }}
       run: |
-        VERSION="${{ inputs.version }}"
-        TAG="${{ inputs.tag_format }}"
-        TAG="${TAG//\{version\}/$VERSION}"
+        TAG="${TAG_FORMAT//\{version\}/$VERSION}"
         COMMIT_MSG=$(git log -1 --format="%s" HEAD)
         BRANCH=$(git branch -r --contains HEAD --format="%(refname:short)" | sed 's|origin/||' | head -1)
 
         if git rev-parse "$TAG" >/dev/null 2>&1; then
-          if [ "${{ inputs.dry_run }}" = "true" ]; then
+          if [ "$DRY_RUN" = "true" ]; then
             echo "Warning: Tag $TAG already exists — skipping in dry run"
           else
             echo "Error: Tag $TAG already exists — has the version been bumped?"
@@ -77,7 +83,7 @@ runs:
         fi
 
         ON_RELEASE_BRANCH=false
-        IFS=',' read -ra PATTERNS <<< "${{ inputs.release_branch }}"
+        IFS=',' read -ra PATTERNS <<< "$RELEASE_BRANCH"
         for pattern in "${PATTERNS[@]}"; do
           pattern=$(echo "$pattern" | xargs)
           if [[ "$BRANCH" == $pattern ]]; then
@@ -86,8 +92,7 @@ runs:
           fi
         done
 
-        PREV_RELEASE_PATTERN="${{ inputs.tag_format }}"
-        PREV_RELEASE_PATTERN="${PREV_RELEASE_PATTERN//\{version\}/[0-9]*.[0-9]*.[0-9]*}"
+        PREV_RELEASE_PATTERN="${TAG_FORMAT//\{version\}/[0-9]*.[0-9]*.[0-9]*}"
         PREV_RELEASE=$(git describe --tags --abbrev=0 --match="$PREV_RELEASE_PATTERN" HEAD^ 2>/dev/null || echo "")
 
         echo "release_tag=$TAG" >> $GITHUB_OUTPUT
@@ -95,4 +100,4 @@ runs:
         echo "branch=$BRANCH" >> $GITHUB_OUTPUT
         echo "on_release_branch=$ON_RELEASE_BRANCH" >> $GITHUB_OUTPUT
         echo "prev_release=$PREV_RELEASE" >> $GITHUB_OUTPUT
-        echo "Validated $TAG @ ${{ inputs.sha }} ($COMMIT_MSG)"
+        echo "Validated $TAG @ $SHA ($COMMIT_MSG)"

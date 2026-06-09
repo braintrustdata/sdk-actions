@@ -4,5 +4,17 @@ source "https://rubygems.org"
 
 gemspec
 
+# Added to test when a gem added to the gemspec conflicts with one that is also
+# a part of Ruby by default, resulting in activation errors.
+#
+# How to fix:
+#
+# Pin openssl to Ruby 4.0's bundled default (4.0.0) to avoid bundler activation
+# conflicts with RUBYOPT pre-loading. Update when ruby_version bumps.
+#
+# This becomes obsolete when this dependency is removed from the gemspec.
+#
+gem "openssl", "4.0.0"
+
 gem "rake", "~> 13.0"
 gem "standard", "~> 1.0"

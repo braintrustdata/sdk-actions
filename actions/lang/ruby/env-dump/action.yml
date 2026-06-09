@@ -1,0 +1,27 @@
+name: Ruby Environment Dump
+description: >
+  Prints Ruby environment information useful for diagnosing failures —
+  Ruby version, bundler version, default gems, and lockfile metadata.
+  Default gems are shown because version conflicts with locked versions
+  cause bundler activation errors.
+
+inputs:
+  working_directory:
+    description: "Path to the gem root (where Gemfile.lock lives)"
+    required: false
+    default: '.'
+
+runs:
+  using: composite
+  steps:
+    - name: Dump Ruby environment
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      run: |
+        echo "=== Ruby environment ==="
+        ruby --version
+        bundle --version
+        echo "=== Default gems (version conflicts may cause activation errors) ==="
+        ruby -e "Gem::Specification.default_stubs.map { |s| \"#{s.name} #{s.version}\" }.sort.each { |g| puts g }"
+        echo "=== Gemfile.lock BUNDLED WITH ==="
+        grep -A1 "^BUNDLED WITH" Gemfile.lock 2>/dev/null || echo "(not found)"

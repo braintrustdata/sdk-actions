@@ -13,4 +13,9 @@ Gem::Specification.new do |spec|
 
   spec.files = Dir.glob("lib/**/*.rb")
   spec.require_paths = ["lib"]
+
+  # Mirrors real SDK gemspecs that depend on openssl. Keeps the lockfile pinned
+  # to the runner's default gem version so the RUBYOPT activation test in
+  # validate-ruby remains meaningful as Ruby versions change.
+  spec.add_runtime_dependency "openssl", ">= 3.3.1", "< 5.0"
 end

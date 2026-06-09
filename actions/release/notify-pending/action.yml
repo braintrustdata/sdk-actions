@@ -18,7 +18,7 @@ inputs:
     description: "Branch containing the SHA"
     required: true
   on_release_branch:
-    description: "Whether the SHA is on the main branch"
+    description: "Whether the SHA is on an expected release branch"
     required: true
   commit_message:
     description: "Commit message at the SHA"
@@ -43,6 +43,10 @@ inputs:
     description: "Slack channel ID to post to"
     required: false
     default: ''
+  slack_mention:
+    description: "Optional Slack handle or group to @mention in the approval request (e.g. @sdk-eng)"
+    required: false
+    default: ''
   emoji:
     description: "Emoji prefix for Slack messages"
     required: false
@@ -56,75 +60,87 @@ runs:
       env:
         TAG: ${{ inputs.release_tag }}
         COMMIT_MSG: ${{ inputs.commit_message }}
+        NOTES_B64: ${{ inputs.notes }}
+        BRANCH: ${{ inputs.branch }}
+        SHA: ${{ inputs.sha }}
+        PREV_RELEASE: ${{ inputs.prev_release }}
+        ON_RELEASE_BRANCH: ${{ inputs.on_release_branch }}
+        DRY_RUN: ${{ inputs.dry_run }}
+        ACTOR: ${{ github.actor }}
       run: |
-        NOTES=$(echo "${{ inputs.notes }}" | base64 -d 2>/dev/null)
+        NOTES=$(echo "$NOTES_B64" | base64 -d 2>/dev/null)
         if [ -z "$NOTES" ]; then NOTES="_Release notes unavailable._"; fi
 
-        BRANCH_LABEL="[${{ inputs.branch }}]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/tree/${{ inputs.branch }})"
-        if [ "${{ inputs.on_release_branch }}" = "false" ]; then
+        BRANCH_LABEL="[$BRANCH]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/tree/$BRANCH)"
+        if [ "$ON_RELEASE_BRANCH" = "false" ]; then
           BRANCH_LABEL="$BRANCH_LABEL ⚠️"
         fi
 
         echo "## $GITHUB_REPOSITORY $TAG" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
 
-        if [ "${{ inputs.dry_run }}" = "true" ]; then
+        if [ "$DRY_RUN" = "true" ]; then
           echo "> [!NOTE]" >> $GITHUB_STEP_SUMMARY
           echo "> Dry run: Nothing will be tagged or published." >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
         fi
 
-        if [ "${{ inputs.on_release_branch }}" = "false" ]; then
+        if [ "$ON_RELEASE_BRANCH" = "false" ]; then
           echo "> [!WARNING]" >> $GITHUB_STEP_SUMMARY
-          echo "> Release SHA is not on a release branch (expected: ${{ inputs.release_branch }}). Is this intentional?" >> $GITHUB_STEP_SUMMARY
+          echo "> Release SHA is not on an expected release branch. Is this intentional?" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
         fi
 
-        echo "**SHA:** [${{ inputs.sha }}]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/commit/${{ inputs.sha }})" >> $GITHUB_STEP_SUMMARY
+        echo "**SHA:** [$SHA]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/commit/$SHA)" >> $GITHUB_STEP_SUMMARY
         echo "**Commit:** $COMMIT_MSG" >> $GITHUB_STEP_SUMMARY
         echo "**Branch:** $BRANCH_LABEL" >> $GITHUB_STEP_SUMMARY
+        echo "**Initiated by:** [$ACTOR]($GITHUB_SERVER_URL/$ACTOR)" >> $GITHUB_STEP_SUMMARY
 
-        if [ -n "${{ inputs.prev_release }}" ]; then
-          DIFF_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/${{ inputs.prev_release }}...${{ inputs.sha }}"
-          echo "**Diff:** [${{ inputs.prev_release }}...$TAG]($DIFF_URL)" >> $GITHUB_STEP_SUMMARY
+        if [ -n "$PREV_RELEASE" ]; then
+          DIFF_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/${PREV_RELEASE}...${SHA}"
+          echo "**Diff:** [${PREV_RELEASE}...$TAG]($DIFF_URL)" >> $GITHUB_STEP_SUMMARY
         fi
 
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "$NOTES" >> $GITHUB_STEP_SUMMARY
 
-    - name: Notify Slack
+    - name: Build Slack message
+      id: message
+      if: ${{ inputs.slack_token != '' && inputs.slack_channel != '' }}
       shell: bash
       env:
-        SLACK_BOT_TOKEN: ${{ inputs.slack_token }}
-        SLACK_CHANNEL: ${{ inputs.slack_channel }}
         TAG: ${{ inputs.release_tag }}
+        EMOJI: ${{ inputs.emoji }}
+        BRANCH: ${{ inputs.branch }}
+        ON_RELEASE_BRANCH: ${{ inputs.on_release_branch }}
+        PREV_RELEASE: ${{ inputs.prev_release }}
+        SHA: ${{ inputs.sha }}
+        DRY_RUN: ${{ inputs.dry_run }}
+        SLACK_MENTION: ${{ inputs.slack_mention }}
         APPROVE_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        ACTOR_LINK: <${{ github.server_url }}/${{ github.actor }}|${{ github.actor }}>
         PR_LIST_RAW: ${{ inputs.pr_list }}
       run: |
-        if [ -z "$SLACK_BOT_TOKEN" ] || [ -z "$SLACK_CHANNEL" ]; then
-          echo "Slack not configured (slack_token or slack_channel not provided) — skipping notification."
-          exit 0
-        fi
-
-        BRANCH_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/tree/${{ inputs.branch }}"
-        BRANCH_LINK="<$BRANCH_URL|${{ inputs.branch }}>"
-        if [ "${{ inputs.on_release_branch }}" = "false" ]; then
+        BRANCH_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/tree/$BRANCH"
+        BRANCH_LINK="<$BRANCH_URL|$BRANCH>"
+        if [ "$ON_RELEASE_BRANCH" = "false" ]; then
           BRANCH_INFO="> ⚠️ NOT on release branch: $BRANCH_LINK"
         else
           BRANCH_INFO="$BRANCH_LINK"
         fi
 
         DIFF_PART=""
-        if [ -n "${{ inputs.prev_release }}" ]; then
-          DIFF_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/${{ inputs.prev_release }}...${{ inputs.sha }}"
-          DIFF_PART=" · <$DIFF_URL|${{ inputs.prev_release }}...$TAG>"
+        if [ -n "$PREV_RELEASE" ]; then
+          DIFF_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/${PREV_RELEASE}...${SHA}"
+          DIFF_PART=" · <$DIFF_URL|${PREV_RELEASE}...$TAG>"
         fi
 
         PR_LIST=$(echo "$PR_LIST_RAW" | tr $'\x1f' '\n' | sed '/^$/d')
 
-        TEXT="${{ inputs.emoji }} *$GITHUB_REPOSITORY $TAG* awaiting approval"
+        TEXT="$EMOJI *$GITHUB_REPOSITORY $TAG* awaiting approval"
+        TEXT="$TEXT\nInitiated by: $ACTOR_LINK"
 
-        if [ "${{ inputs.dry_run }}" = "true" ]; then
+        if [ "$DRY_RUN" = "true" ]; then
           TEXT="$TEXT\n> :information_source: _Dry run: nothing will be tagged or published._"
         fi
 
@@ -134,12 +150,21 @@ runs:
           TEXT="$TEXT\n$PR_LIST"
         fi
 
+        if [ -n "$SLACK_MENTION" ]; then
+          TEXT="$TEXT\n$SLACK_MENTION please review and approve."
+        fi
+
         TEXT="$TEXT\n<$APPROVE_URL|View changes & approve>"
 
-        # jq --arg passes strings literally, so \n must be real newlines before encoding
-        TEXT=$(printf '%b' "$TEXT")
-        curl -s -X POST "https://slack.com/api/chat.postMessage" \
-          -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
-          -H "Content-Type: application/json; charset=utf-8" \
-          -d "$(jq -n --arg channel "$SLACK_CHANNEL" --arg text "$TEXT" \
-            '{channel: $channel, text: $text}')"
+        { echo 'text<<SLACK_DELIMITER'
+          printf '%s\n' "$TEXT"
+          echo 'SLACK_DELIMITER'
+        } >> $GITHUB_OUTPUT
+
+    - name: Send Slack message
+      if: ${{ inputs.slack_token != '' && inputs.slack_channel != '' }}
+      uses: ./actions/slack/send
+      with:
+        token: ${{ inputs.slack_token }}
+        channel: ${{ inputs.slack_channel }}
+        text: ${{ steps.message.outputs.text }}

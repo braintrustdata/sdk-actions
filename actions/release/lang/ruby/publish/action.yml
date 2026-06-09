@@ -5,18 +5,34 @@ description: >
   environment — set DRY_RUN=true to lint and build without pushing.
 
 inputs:
-  working-directory:
+  working_directory:
     description: "Path to the gem root (where the Gemfile and gemspec live)"
     required: false
     default: '.'
-  ruby-version:
-    description: "Ruby version to use (defaults to .ruby-version file if present)"
+  ruby_version:
+    description: "Ruby version to use"
     required: false
-    default: '3.4'
+    default: '4.0'
   dry_run:
     description: "Skip gem push and tag push"
     required: false
     default: 'false'
+  release_tag:
+    description: "The release tag — used in failure notifications"
+    required: false
+    default: ''
+  slack_token:
+    description: "Slack bot token for failure notifications"
+    required: false
+    default: ''
+  slack_channel:
+    description: "Slack channel ID for failure notifications"
+    required: false
+    default: ''
+  slack_mention:
+    description: "Optional Slack handle or group to notify on failure"
+    required: false
+    default: ''
 
 runs:
   using: composite
@@ -24,9 +40,9 @@ runs:
     - name: Set up Ruby
       uses: ruby/setup-ruby@afeafc3d1ab54a631816aba4c914a0081c12ff2f # v1.310.0
       with:
-        ruby-version: ${{ inputs.ruby-version }}
+        ruby-version: ${{ inputs.ruby_version }}
         bundler-cache: true
-        working-directory: ${{ inputs.working-directory }}
+        working-directory: ${{ inputs.working_directory }}
 
     - name: Publish gem with attestation
       uses: rubygems/release-gem@6317d8d1f7e28c24d28f6eff169ea854948bd9f7 # v1.2.0
@@ -34,7 +50,18 @@ runs:
         await-release: ${{ inputs.dry_run == 'true' && 'false' || 'true' }}
         setup-trusted-publisher: ${{ inputs.dry_run == 'true' && 'false' || 'true' }}
         attestations: ${{ inputs.dry_run == 'true' && 'false' || 'true' }}
-        working-directory: ${{ inputs.working-directory }}
+        working-directory: ${{ inputs.working_directory }}
       env:
         GITHUB_TOKEN: ${{ github.token }}
         DRY_RUN: ${{ inputs.dry_run }}
+
+    - name: Handle failure
+      if: failure()
+      uses: ./actions/release/lang/ruby/on-failure
+      with:
+        release_tag: ${{ inputs.release_tag }}
+        step: publish
+        working_directory: ${{ inputs.working_directory }}
+        slack_token: ${{ inputs.slack_token }}
+        slack_channel: ${{ inputs.slack_channel }}
+        slack_mention: ${{ inputs.slack_mention }}

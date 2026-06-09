@@ -1,6 +1,6 @@
 name: Notify Release Complete
 description: >
-  Posts the post-publish Slack notification with release link and PR list.
+  Posts a step summary and Slack notification when a release completes.
 
 inputs:
   release_tag:
@@ -14,7 +14,7 @@ inputs:
     description: "Branch the release was made from"
     required: true
   on_release_branch:
-    description: "Whether the release was from main"
+    description: "Whether the release was from an expected release branch"
     required: true
   pr_list:
     description: "x1f-delimited PR list from prepare action"
@@ -36,60 +36,131 @@ inputs:
     description: "Emoji prefix for Slack messages"
     required: false
     default: ':package:'
+  links:
+    description: >
+      JSON array of links to include in the summary and Slack message.
+      Each entry: {"label": "...", "url": "..."}. The GitHub Release link
+      is always prepended automatically (unless dry run).
+      Example: [{"label":"RubyGems","url":"https://rubygems.org/..."}]
+    required: false
+    default: '[]'
 
 runs:
   using: composite
   steps:
-    - name: Notify Slack
+    - name: Post release summary
       shell: bash
       env:
-        SLACK_BOT_TOKEN: ${{ inputs.slack_token }}
-        SLACK_CHANNEL: ${{ inputs.slack_channel }}
         TAG: ${{ inputs.release_tag }}
+        PREV_RELEASE: ${{ inputs.prev_release }}
+        BRANCH: ${{ inputs.branch }}
+        ON_RELEASE_BRANCH: ${{ inputs.on_release_branch }}
+        DRY_RUN: ${{ inputs.dry_run }}
+        LINKS_JSON: ${{ inputs.links }}
+        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      run: |
+        RELEASE_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$TAG"
+        BRANCH_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/tree/$BRANCH"
+
+        if [ "$DRY_RUN" = "true" ]; then
+          echo "## $GITHUB_REPOSITORY $TAG — dry run complete" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "## $GITHUB_REPOSITORY $TAG — published ✅" >> $GITHUB_STEP_SUMMARY
+        fi
+        echo "" >> $GITHUB_STEP_SUMMARY
+
+        if [ "$DRY_RUN" = "true" ]; then
+          echo "> [!NOTE]" >> $GITHUB_STEP_SUMMARY
+          echo "> Dry run: Nothing was tagged or published." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+        fi
+
+        if [ "$ON_RELEASE_BRANCH" = "false" ]; then
+          echo "> [!WARNING]" >> $GITHUB_STEP_SUMMARY
+          echo "> Released from non-release branch: [$BRANCH]($BRANCH_URL)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+        fi
+
+        echo "**Branch:** [$BRANCH]($BRANCH_URL)" >> $GITHUB_STEP_SUMMARY
+
+        if [ -n "$PREV_RELEASE" ]; then
+          DIFF_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/${PREV_RELEASE}...$TAG"
+          echo "**Diff:** [$PREV_RELEASE...$TAG]($DIFF_URL)" >> $GITHUB_STEP_SUMMARY
+        fi
+
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Published to" >> $GITHUB_STEP_SUMMARY
+
+        if [ "$DRY_RUN" = "true" ]; then
+          echo "- [View dry run]($RUN_URL)" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "- [GitHub Release]($RELEASE_URL)" >> $GITHUB_STEP_SUMMARY
+          if [ -n "$LINKS_JSON" ] && [ "$LINKS_JSON" != "[]" ]; then
+            echo "$LINKS_JSON" | jq -r '.[] | "- [\(.label)](\(.url))"' >> $GITHUB_STEP_SUMMARY
+          fi
+        fi
+
+    - name: Build Slack message
+      id: message
+      if: ${{ inputs.slack_token != '' && inputs.slack_channel != '' }}
+      shell: bash
+      env:
+        TAG: ${{ inputs.release_tag }}
+        EMOJI: ${{ inputs.emoji }}
+        BRANCH: ${{ inputs.branch }}
+        ON_RELEASE_BRANCH: ${{ inputs.on_release_branch }}
+        PREV_RELEASE: ${{ inputs.prev_release }}
+        DRY_RUN: ${{ inputs.dry_run }}
+        LINKS_JSON: ${{ inputs.links }}
         RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         PR_LIST_RAW: ${{ inputs.pr_list }}
       run: |
-        if [ -z "$SLACK_BOT_TOKEN" ] || [ -z "$SLACK_CHANNEL" ]; then
-          echo "Slack not configured (slack_token or slack_channel not provided) — skipping notification."
-          exit 0
-        fi
-
         RELEASE_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$TAG"
 
         DIFF_PART=""
-        if [ -n "${{ inputs.prev_release }}" ]; then
-          DIFF_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/${{ inputs.prev_release }}...$TAG"
-          DIFF_PART="<$DIFF_URL|${{ inputs.prev_release }}...$TAG>  ·  "
+        if [ -n "$PREV_RELEASE" ]; then
+          DIFF_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/${PREV_RELEASE}...$TAG"
+          DIFF_PART="<$DIFF_URL|${PREV_RELEASE}...$TAG>  ·  "
         fi
 
         PR_LIST=$(echo "$PR_LIST_RAW" | tr $'\x1f' '\n' | sed '/^$/d')
 
-        if [ "${{ inputs.dry_run }}" = "true" ]; then
-          TEXT="${{ inputs.emoji }} *$GITHUB_REPOSITORY $TAG* complete"
-          TEXT="$TEXT\n> :information_source: _Dry run: gem built, nothing tagged or published._"
+        if [ "$DRY_RUN" = "true" ]; then
+          TEXT="$EMOJI *$GITHUB_REPOSITORY $TAG* complete"
+          TEXT="$TEXT\n> :information_source: _Dry run: nothing tagged or published._"
         else
-          TEXT="${{ inputs.emoji }} *$GITHUB_REPOSITORY $TAG* published"
+          TEXT="$EMOJI *$GITHUB_REPOSITORY $TAG* published"
         fi
 
-        if [ "${{ inputs.on_release_branch }}" = "false" ]; then
-          BRANCH_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/tree/${{ inputs.branch }}"
-          TEXT="$TEXT\n> ⚠️ NOT on release branch: <$BRANCH_URL|${{ inputs.branch }}>"
+        if [ "$ON_RELEASE_BRANCH" = "false" ]; then
+          BRANCH_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/tree/$BRANCH"
+          TEXT="$TEXT\n> ⚠️ NOT on release branch: <$BRANCH_URL|$BRANCH>"
         fi
 
-        if [ "${{ inputs.dry_run }}" = "true" ]; then
+        if [ "$DRY_RUN" = "true" ]; then
           TEXT="$TEXT\n${DIFF_PART}<$RUN_URL|View dry run>"
         else
-          TEXT="$TEXT\n${DIFF_PART}<$RELEASE_URL|View release>"
+          SLACK_LINKS="${DIFF_PART}<$RELEASE_URL|View release>"
+          if [ -n "$LINKS_JSON" ] && [ "$LINKS_JSON" != "[]" ]; then
+            EXTRA=$(echo "$LINKS_JSON" | jq -r '[.[] | "<\(.url)|\(.label)>"] | join("  ·  ")')
+            SLACK_LINKS="$SLACK_LINKS  ·  $EXTRA"
+          fi
+          TEXT="$TEXT\n$SLACK_LINKS"
         fi
 
         if [ -n "$PR_LIST" ]; then
           TEXT="$TEXT\n$PR_LIST"
         fi
 
-        # jq --arg passes strings literally, so \n must be real newlines before encoding
-        TEXT=$(printf '%b' "$TEXT")
-        curl -s -X POST "https://slack.com/api/chat.postMessage" \
-          -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
-          -H "Content-Type: application/json; charset=utf-8" \
-          -d "$(jq -n --arg channel "$SLACK_CHANNEL" --arg text "$TEXT" \
-            '{channel: $channel, text: $text}')"
+        { echo 'text<<SLACK_DELIMITER'
+          printf '%s\n' "$TEXT"
+          echo 'SLACK_DELIMITER'
+        } >> $GITHUB_OUTPUT
+
+    - name: Send Slack message
+      if: ${{ inputs.slack_token != '' && inputs.slack_channel != '' }}
+      uses: ./actions/slack/send
+      with:
+        token: ${{ inputs.slack_token }}
+        channel: ${{ inputs.slack_channel }}
+        text: ${{ steps.message.outputs.text }}

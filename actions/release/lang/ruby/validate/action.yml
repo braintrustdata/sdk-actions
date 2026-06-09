@@ -1,0 +1,107 @@
+name: Validate Ruby Release
+description: >
+  Checks out the release SHA, sets up Ruby, reads the gem version, validates
+  the release (tag existence, branch, commit metadata), and runs lint + build
+  to confirm the gem is publishable before the approval gate.
+
+inputs:
+  sha:
+    description: "Commit SHA being released"
+    required: true
+  dry_run:
+    description: "Skip tag existence failure in dry runs"
+    required: false
+    default: 'false'
+  version:
+    description: >
+      Explicit version override. If provided, version_file and version_module
+      are ignored. Use when the version is computed externally (e.g. bt-fake
+      auto-bump from run number).
+    required: false
+    default: ''
+  version_file:
+    description: "Path to the Ruby version file (e.g. lib/gem_name/version.rb)"
+    required: false
+    default: ''
+  version_module:
+    description: "Ruby module holding the VERSION constant (e.g. GemName)"
+    required: false
+    default: ''
+  working_directory:
+    description: "Path to the gem root (where Gemfile and gemspec live)"
+    required: false
+    default: '.'
+  ruby_version:
+    description: "Ruby version to use"
+    required: false
+    default: '4.0'
+outputs:
+  release_tag:
+    description: "The release tag (e.g. v0.3.2)"
+    value: ${{ steps.validate.outputs.release_tag }}
+  prev_release:
+    description: "The previous release tag"
+    value: ${{ steps.validate.outputs.prev_release }}
+  branch:
+    description: "The branch containing the SHA"
+    value: ${{ steps.validate.outputs.branch }}
+  on_release_branch:
+    description: "Whether the SHA is on an expected release branch"
+    value: ${{ steps.validate.outputs.on_release_branch }}
+  commit_message:
+    description: "The commit message at the SHA"
+    value: ${{ steps.validate.outputs.commit_message }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        ref: ${{ inputs.sha }}
+        fetch-depth: 0
+
+    - name: Set up Ruby
+      uses: ruby/setup-ruby@afeafc3d1ab54a631816aba4c914a0081c12ff2f # v1.310.0
+      with:
+        ruby-version: ${{ inputs.ruby_version }}
+        bundler-cache: true
+        working-directory: ${{ inputs.working_directory }}
+
+    - name: Read version
+      id: read-version
+      shell: bash
+      env:
+        VERSION_OVERRIDE: ${{ inputs.version }}
+        VERSION_FILE: ${{ inputs.version_file }}
+        VERSION_MODULE: ${{ inputs.version_module }}
+      run: |
+        if [ -n "$VERSION_OVERRIDE" ]; then
+          echo "version=$VERSION_OVERRIDE" >> $GITHUB_OUTPUT
+        else
+          VERSION=$(ruby -r "./$VERSION_FILE" -e "puts Object.const_get(ENV.fetch('VERSION_MODULE')).const_get(:VERSION)")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Validate release
+      id: validate
+      uses: ./actions/release/validate
+      with:
+        version: ${{ steps.read-version.outputs.version }}
+        sha: ${{ inputs.sha }}
+        dry_run: ${{ inputs.dry_run }}
+
+    - name: Lint and build
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      env:
+        # Simulate rubygems/release-gem's RUBYOPT injection, which pre-loads gems
+        # (including openssl for attestation) before bundle exec runs. Exposes
+        # default gem activation conflicts before the approval gate.
+        RUBYOPT: "-r openssl"
+      run: bundle exec rake lint build
+
+    - name: Dump Ruby environment on failure
+      if: failure()
+      uses: ./actions/lang/ruby/env-dump
+      with:
+        working_directory: ${{ inputs.working_directory }}

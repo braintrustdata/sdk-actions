@@ -84,7 +84,7 @@ runs:
         fetch-depth: 0
 
     - name: Push to RubyGems
-      uses: ./actions/release/lang/ruby/rubygems-push
+      uses: braintrustdata/sdk-actions/actions/release/lang/ruby/rubygems-push@f608d330bca55ef04441a84cfd7f1a2358ac3575
       with:
         working_directory: ${{ inputs.working_directory }}
         ruby_version: ${{ inputs.ruby_version }}
@@ -96,7 +96,7 @@ runs:
 
     - name: Create GitHub release
       if: ${{ inputs.github_release == 'true' }}
-      uses: ./actions/release/create-github-release
+      uses: braintrustdata/sdk-actions/actions/release/create-github-release@f608d330bca55ef04441a84cfd7f1a2358ac3575
       with:
         release_tag: ${{ inputs.release_tag }}
         sha: ${{ inputs.sha }}
@@ -104,7 +104,7 @@ runs:
         dry_run: ${{ inputs.dry_run }}
 
     - name: Notify release complete
-      uses: ./actions/release/lang/ruby/notify-published
+      uses: braintrustdata/sdk-actions/actions/release/lang/ruby/notify-published@f608d330bca55ef04441a84cfd7f1a2358ac3575
       with:
         release_tag: ${{ inputs.release_tag }}
         prev_release: ${{ inputs.prev_release }}

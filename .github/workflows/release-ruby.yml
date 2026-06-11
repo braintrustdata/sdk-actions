@@ -72,11 +72,15 @@ jobs:
     outputs:
       version: ${{ steps.bump.outputs.version }}
     steps:
-      # bt-fake: generates a version from the run number — no version bump PR needed.
-      # Remove this job in real SDK workflows; version comes from the version bump PR.
+      # bt-fake: derives next version by querying RubyGems.org and incrementing the
+      # patch. Falls back to 0.0.1 on first publish (404). Remove this job in real
+      # SDK workflows; version comes from the version bump PR.
       - name: Bump version
         id: bump
-        run: echo "version=0.0.${{ github.run_number }}" >> $GITHUB_OUTPUT
+        run: |
+          CURRENT=$(curl -sf https://rubygems.org/api/v1/gems/bt-fake.json | jq -r '.version' || echo "0.0.0")
+          IFS='.' read -r major minor patch <<< "$CURRENT"
+          echo "version=$major.$minor.$((patch + 1))" >> $GITHUB_OUTPUT
 
   validate:
     needs: bump

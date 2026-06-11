@@ -32,6 +32,10 @@ inputs:
     description: "Slack channel ID to post to"
     required: false
     default: ''
+  slack_mention:
+    description: "Optional Slack handle or group to @mention on completion (e.g. @sdk-eng)"
+    required: false
+    default: ''
   emoji:
     description: "Emoji prefix for Slack messages"
     required: false
@@ -111,6 +115,7 @@ runs:
         ON_RELEASE_BRANCH: ${{ inputs.on_release_branch }}
         PREV_RELEASE: ${{ inputs.prev_release }}
         DRY_RUN: ${{ inputs.dry_run }}
+        SLACK_MENTION: ${{ inputs.slack_mention }}
         LINKS_JSON: ${{ inputs.links }}
         RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         PR_LIST_RAW: ${{ inputs.pr_list }}
@@ -150,6 +155,10 @@ runs:
 
         if [ -n "$PR_LIST" ]; then
           TEXT="$TEXT\n$PR_LIST"
+        fi
+
+        if [ -n "$SLACK_MENTION" ]; then
+          TEXT="$TEXT\n$SLACK_MENTION"
         fi
 
         { echo 'text<<SLACK_DELIMITER'

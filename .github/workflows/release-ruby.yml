@@ -72,11 +72,15 @@ jobs:
     outputs:
       version: ${{ steps.bump.outputs.version }}
     steps:
-      # bt-fake: generates a version from the run number — no version bump PR needed.
-      # Remove this job in real SDK workflows; version comes from the version bump PR.
+      # bt-fake: derives next version by querying RubyGems.org and incrementing the
+      # patch. Falls back to 0.0.1 on first publish (404). Remove this job in real
+      # SDK workflows; version comes from the version bump PR.
       - name: Bump version
         id: bump
-        run: echo "version=0.0.${{ github.run_number }}" >> $GITHUB_OUTPUT
+        run: |
+          CURRENT=$(curl -sf https://rubygems.org/api/v1/gems/bt-fake.json | jq -r '.version' || echo "0.0.0")
+          IFS='.' read -r major minor patch <<< "$CURRENT"
+          echo "version=$major.$minor.$((patch + 1))" >> $GITHUB_OUTPUT
 
   validate:
     needs: bump
@@ -184,37 +188,22 @@ jobs:
           sed -i "s|bt-fake ([0-9]*\.[0-9]*\.[0-9]*)|bt-fake ($VERSION)|" \
             test/release/ruby/Gemfile.lock
 
-      # Update working-directory to your gem's root
-      - name: Publish gem
+      - name: Publish
         uses: ./actions/release/lang/ruby/publish
         with:
+          sha: ${{ inputs.sha }}
+          checkout: 'false' # bt-fake: skip internal checkout — version patching above must survive into the gem build
           working_directory: test/release/ruby
           dry_run: ${{ inputs.dry_run }}
           release_tag: ${{ needs.validate.outputs.release_tag }}
-          slack_token: ${{ secrets.SLACK_BOT_TOKEN }}
-          slack_channel: ${{ vars.SLACK_SDK_RELEASE_CHANNEL }}
-          # slack_mention: '@sdk-eng'
-
-      # bt-fake: GitHub release creation disabled to avoid tag/release pollution
-      # from repeated test runs. In real SDK workflows, uncomment this step.
-      # - name: Create GitHub release
-      #   uses: ./actions/release/create-github-release
-      #   with:
-      #     release_tag: ${{ needs.validate.outputs.release_tag }}
-      #     sha: ${{ inputs.sha }}
-      #     notes: ${{ needs.prepare.outputs.notes }}
-      #     dry_run: ${{ inputs.dry_run }}
-
-      - name: Notify release complete
-        uses: ./actions/release/lang/ruby/notify-published
-        with:
-          release_tag: ${{ needs.validate.outputs.release_tag }}
+          github_release: 'false' # bt-fake: omit GitHub release to avoid tag/release pollution from repeated test runs
+          notes: ${{ needs.prepare.outputs.notes }}
           prev_release: ${{ needs.validate.outputs.prev_release }}
           branch: ${{ needs.validate.outputs.branch }}
           on_release_branch: ${{ needs.validate.outputs.on_release_branch }}
           pr_list: ${{ needs.prepare.outputs.pr_list }}
-          dry_run: ${{ inputs.dry_run }}
           slack_token: ${{ secrets.SLACK_BOT_TOKEN }}
           slack_channel: ${{ vars.SLACK_SDK_RELEASE_CHANNEL }}
           # slack_mention: '@sdk-eng'
+          # failure_slack_mention: '@sdk-eng'
           gem_name: bt-fake

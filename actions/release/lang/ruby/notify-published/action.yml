@@ -33,6 +33,10 @@ inputs:
     description: "Slack channel ID"
     required: false
     default: ''
+  slack_mention:
+    description: "Optional Slack handle or group to @mention on completion (e.g. @sdk-eng)"
+    required: false
+    default: ''
   emoji:
     description: "Emoji prefix for Slack messages"
     required: false
@@ -70,5 +74,6 @@ runs:
         dry_run: ${{ inputs.dry_run }}
         slack_token: ${{ inputs.slack_token }}
         slack_channel: ${{ inputs.slack_channel }}
+        slack_mention: ${{ inputs.slack_mention }}
         emoji: ${{ inputs.emoji }}
         links: ${{ steps.links.outputs.links }}

@@ -64,7 +64,7 @@ runs:
         fi
         echo "links=$LINKS" >> $GITHUB_OUTPUT
 
-    - uses: ./actions/release/notify-published
+    - uses: braintrustdata/sdk-actions/actions/release/notify-published@f608d330bca55ef04441a84cfd7f1a2358ac3575
       with:
         release_tag: ${{ inputs.release_tag }}
         prev_release: ${{ inputs.prev_release }}

@@ -30,11 +30,11 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: ./actions/lang/ruby/env-dump
+    - uses: braintrustdata/sdk-actions/actions/lang/ruby/env-dump@f608d330bca55ef04441a84cfd7f1a2358ac3575
       with:
         working_directory: ${{ inputs.working_directory }}
 
-    - uses: ./actions/release/notify-failure
+    - uses: braintrustdata/sdk-actions/actions/release/notify-failure@f608d330bca55ef04441a84cfd7f1a2358ac3575
       with:
         release_tag: ${{ inputs.release_tag }}
         step: ${{ inputs.step }}

@@ -84,7 +84,7 @@ runs:
 
     - name: Validate release
       id: validate
-      uses: ./actions/release/validate
+      uses: braintrustdata/sdk-actions/actions/release/validate@f608d330bca55ef04441a84cfd7f1a2358ac3575
       with:
         version: ${{ steps.read-version.outputs.version }}
         sha: ${{ inputs.sha }}
@@ -102,6 +102,6 @@ runs:
 
     - name: Dump Ruby environment on failure
       if: failure()
-      uses: ./actions/lang/ruby/env-dump
+      uses: braintrustdata/sdk-actions/actions/lang/ruby/env-dump@f608d330bca55ef04441a84cfd7f1a2358ac3575
       with:
         working_directory: ${{ inputs.working_directory }}

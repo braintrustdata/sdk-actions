@@ -57,7 +57,7 @@ runs:
 
     - name: Handle failure
       if: failure()
-      uses: ./actions/release/lang/ruby/on-failure
+      uses: braintrustdata/sdk-actions/actions/release/lang/ruby/on-failure@f608d330bca55ef04441a84cfd7f1a2358ac3575
       with:
         release_tag: ${{ inputs.release_tag }}
         step: publish

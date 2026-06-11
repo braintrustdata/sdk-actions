@@ -53,7 +53,7 @@ runs:
 
     - name: Send Slack message
       if: ${{ inputs.slack_token != '' && inputs.slack_channel != '' }}
-      uses: ./actions/slack/send
+      uses: braintrustdata/sdk-actions/actions/slack/send@f608d330bca55ef04441a84cfd7f1a2358ac3575
       with:
         token: ${{ inputs.slack_token }}
         channel: ${{ inputs.slack_channel }}

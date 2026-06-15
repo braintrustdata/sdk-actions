@@ -57,6 +57,6 @@ jobs:
         uses: ./actions/slack/send
         with:
           token: ${{ secrets.SLACK_BOT_TOKEN }}
-          channel: C0B61MXS891
+          channel: C0B61MXS891 # feed-sdk-security
           text: "Open Dependabot security alerts for ${{ matrix.owner }}/${{ matrix.repo }}: ${{ steps.alerts.outputs.count }}"
           fail_on_error: "true"

@@ -23,6 +23,18 @@ jobs:
         include:
           - owner: braintrustdata
             repo: braintrust-sdk-javascript
+          - owner: braintrustdata
+            repo: braintrust-sdk-python
+          - owner: braintrustdata
+            repo: braintrust-sdk-go
+          - owner: braintrustdata
+            repo: braintrust-sdk-ruby
+          - owner: braintrustdata
+            repo: braintrust-sdk-rust
+          - owner: braintrustdata
+            repo: braintrust-sdk-java
+          - owner: braintrustdata
+            repo: braintrust-sdk-dotnet
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 

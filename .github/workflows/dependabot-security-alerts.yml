@@ -1,0 +1,74 @@
+name: Report Dependabot security alerts
+
+on:
+  schedule:
+    - cron: "0 5 * * *" # every day at 6am GMT+1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependabot-security-alerts-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  report-alerts:
+    name: Report alerts (${{ matrix.repo }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - owner: braintrustdata
+            repo: braintrust-sdk-javascript
+          - owner: braintrustdata
+            repo: braintrust-sdk-python
+          - owner: braintrustdata
+            repo: braintrust-sdk-go
+          - owner: braintrustdata
+            repo: braintrust-sdk-ruby
+          - owner: braintrustdata
+            repo: braintrust-sdk-rust
+          - owner: braintrustdata
+            repo: braintrust-sdk-java
+          - owner: braintrustdata
+            repo: braintrust-sdk-dotnet
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0
+        with:
+          app-id: ${{ secrets.BRAINTRUST_BOT_APP_ID }}
+          private-key: ${{ secrets.BRAINTRUST_BOT_PRIVATE_KEY }}
+          owner: ${{ matrix.owner }}
+          repositories: |
+            ${{ matrix.repo }}
+          permission-vulnerability-alerts: read
+
+      - name: Count open Dependabot alerts
+        id: alerts
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_REPO: ${{ matrix.owner }}/${{ matrix.repo }}
+        run: |
+          set -euo pipefail
+
+          count="$(gh api --paginate --slurp \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2026-03-10" \
+            "/repos/${GH_REPO}/dependabot/alerts?state=open&per_page=100" \
+            --jq '([.[] | length] | add) // 0')"
+          echo "count=${count}" >> "${GITHUB_OUTPUT}"
+
+      - name: Send Slack message
+        if: steps.alerts.outputs.count != '0'
+        uses: ./actions/slack/send
+        with:
+          token: ${{ secrets.SLACK_BOT_TOKEN }}
+          channel: C0B61MXS891 # feed-sdk-security
+          text: "Open Dependabot security alerts for ${{ matrix.owner }}/${{ matrix.repo }}: ${{ steps.alerts.outputs.count }}"
+          fail_on_error: "true"

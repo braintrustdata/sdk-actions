@@ -1,0 +1,19 @@
+<%#
+  Prints environment diagnostics (Ruby/bundler versions, default
+  gems, the lockfile's BUNDLED WITH) to help debug a failed release. Default gems
+  are listed because version conflicts with locked versions cause bundler
+  activation errors — a common, confusing failure mode. Run from the gem root.
+
+  @param working_directory [String] expr for the gem root. Default: ${{ inputs.working_directory }}
+-%>
+- name: Dump Ruby environment
+  shell: bash
+  working-directory: <%= locals.fetch(:working_directory) { "${{ inputs.working_directory }}" } %>
+  run: |
+    echo "=== Ruby environment ==="
+    ruby --version
+    bundle --version
+    echo "=== Default gems (version conflicts may cause activation errors) ==="
+    ruby -e "Gem::Specification.default_stubs.map { |s| \"#{s.name} #{s.version}\" }.sort.each { |g| puts g }"
+    echo "=== Gemfile.lock BUNDLED WITH ==="
+    grep -A1 "^BUNDLED WITH" Gemfile.lock 2>/dev/null || echo "(not found)"

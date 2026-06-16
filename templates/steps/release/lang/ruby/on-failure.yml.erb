@@ -1,0 +1,9 @@
+<%#
+  The publish failure handler — dumps the Ruby environment for
+  diagnostics and posts a Slack failure notification. Composed as the terminal
+  step of ruby/publish under `if: failure()`; the composing action stamps that
+  guard onto each step here, and slack/send self-guards when Slack isn't set up.
+-%>
+<%= render_step('lang/ruby/env-dump', indent: 0) %>
+
+<%= render_step('release/notify-failure', indent: 0, failed_step: "publish", mention: "${{ inputs.failure_slack_mention }}") %>

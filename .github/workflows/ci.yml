@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # Regenerates actions/ from templates/, validates them (YAML + schema), and
+  # fails if the committed actions/ is out of sync. actions/ is generated output
+  # and must always match `rake generate`. Least-privilege: no secrets in scope.
+  #
+  # Tool versions come from mise.toml (single source of truth). Ruby is installed
+  # prebuilt by setup-ruby (fast) rather than compiled by mise; everything else
+  # (Python, check-jsonschema) comes from mise via mise.toml.
+  check-generated:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    env:
+      MISE_DISABLE_TOOLS: ruby   # Ruby comes prebuilt from setup-ruby; don't let mise compile it
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Ruby (prebuilt; version read from mise.toml)
+        uses: ruby/setup-ruby@afeafc3d1ab54a631816aba4c914a0081c12ff2f # v1.310.0
+        with:
+          ruby-version: mise.toml
+
+      - name: Set up Python + check-jsonschema (from mise.toml)
+        uses: jdx/mise-action@dba19683ed58901619b14f395a24841710cb4925 # v4.1.0
+
+      - name: Regenerate, validate, and verify in sync
+        run: rake ci:actions

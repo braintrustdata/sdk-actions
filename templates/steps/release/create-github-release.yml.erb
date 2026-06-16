@@ -1,0 +1,31 @@
+<%#
+  Creates a GitHub release, or previews the notes on a dry run.
+  Self-guards in shell on `github_release` (skips when disabled) and `dry_run`
+  (preview vs. create), so the composing action needs no `if:` on it. Requires
+  the composing action to expose github_release / dry_run / release_tag / notes / sha inputs.
+-%>
+- name: Create GitHub release
+  shell: bash
+  env:
+    GITHUB_TOKEN: ${{ github.token }}
+    ENABLED: ${{ inputs.github_release }}
+    DRY_RUN: ${{ inputs.dry_run }}
+    TAG: ${{ inputs.release_tag }}
+    NOTES_B64: ${{ inputs.notes }}
+    SHA: ${{ inputs.sha }}
+  run: |
+    if [ "$ENABLED" != "true" ]; then
+      echo "GitHub release disabled; skipping."
+      exit 0
+    fi
+    if [ "$DRY_RUN" = "true" ]; then
+      echo "DRY RUN: would create GitHub release $TAG"
+      echo "--- Release notes preview ---"
+      echo "$NOTES_B64" | base64 -d 2>/dev/null || echo "(unavailable)"
+    else
+      echo "$NOTES_B64" | base64 -d 2>/dev/null > /tmp/release-notes.md
+      gh release create "$TAG" \
+        --title "$TAG" \
+        --notes-file /tmp/release-notes.md \
+        --target "$SHA"
+    fi

@@ -54,7 +54,7 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           count="$(gh api --paginate --slurp "repos/${{ matrix.owner }}/${{ matrix.repo }}/issues?state=open&per_page=100" \
-            --jq 'flatten | map(select(.pull_request | not) | select((.body // "") | contains("<!-- provider-gap-audit: ") or contains("<!-- library-gap-audit: "))) | length')"
+            | jq 'flatten | map(select(.pull_request | not) | select((.body // "") | contains("<!-- provider-gap-audit: ") or contains("<!-- library-gap-audit: "))) | length')"
           echo "count=$count" >> "$GITHUB_OUTPUT"
           if [ "$count" -gt 0 ]; then
             echo "has_audit_issues=true" >> "$GITHUB_OUTPUT"

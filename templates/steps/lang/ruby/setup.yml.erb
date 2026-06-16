@@ -1,0 +1,12 @@
+<%#
+  Installs Ruby and the bundle (with caching) for the gem.
+
+  @param ruby_version      [String] expr for the Ruby version.  Default: ${{ inputs.ruby_version }}
+  @param working_directory [String] expr for the gem root.      Default: ${{ inputs.working_directory }}
+-%>
+- name: Set up Ruby
+  uses: ruby/setup-ruby@afeafc3d1ab54a631816aba4c914a0081c12ff2f # v1.310.0
+  with:
+    ruby-version: <%= locals.fetch(:ruby_version) { "${{ inputs.ruby_version }}" } %>
+    bundler-cache: true
+    working-directory: <%= locals.fetch(:working_directory) { "${{ inputs.working_directory }}" } %>

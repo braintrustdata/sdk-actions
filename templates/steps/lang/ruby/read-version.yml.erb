@@ -1,0 +1,23 @@
+<%#
+  Resolves the gem version into a `version` output. Uses the
+  explicit override when given, otherwise reads the VERSION constant from the
+  version file. Sets id: read-version.
+
+  @param version        [String] expr for an explicit version override. Default: ${{ inputs.version }}
+  @param version_file   [String] expr for the version file path.        Default: ${{ inputs.version_file }}
+  @param version_module [String] expr for the module holding VERSION.    Default: ${{ inputs.version_module }}
+-%>
+- name: Read version
+  id: read-version
+  shell: bash
+  env:
+    VERSION_OVERRIDE: <%= locals.fetch(:version) { "${{ inputs.version }}" } %>
+    VERSION_FILE: <%= locals.fetch(:version_file) { "${{ inputs.version_file }}" } %>
+    VERSION_MODULE: <%= locals.fetch(:version_module) { "${{ inputs.version_module }}" } %>
+  run: |
+    if [ -n "$VERSION_OVERRIDE" ]; then
+      echo "version=$VERSION_OVERRIDE" >> $GITHUB_OUTPUT
+    else
+      VERSION=$(ruby -r "./$VERSION_FILE" -e "puts Object.const_get(ENV.fetch('VERSION_MODULE')).const_get(:VERSION)")
+      echo "version=$VERSION" >> $GITHUB_OUTPUT
+    fi

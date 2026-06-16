@@ -1,0 +1,20 @@
+<%#
+  Builds the RubyGems links JSON, then posts the shared release
+  completion notification (release/notify-published) with those links.
+-%>
+- name: Build RubyGems links
+  id: links
+  shell: bash
+  env:
+    GEM_NAME: ${{ inputs.gem_name }}
+    RELEASE_TAG: ${{ inputs.release_tag }}
+    DRY_RUN: ${{ inputs.dry_run }}
+  run: |
+    LINKS='[]'
+    if [ "$DRY_RUN" != "true" ] && [ -n "$GEM_NAME" ]; then
+      VERSION="${RELEASE_TAG#v}"
+      LINKS="[{\"label\":\"RubyGems\",\"url\":\"https://rubygems.org/gems/$GEM_NAME/versions/$VERSION\"}]"
+    fi
+    echo "links=$LINKS" >> $GITHUB_OUTPUT
+
+<%= render_step('release/notify-published', indent: 0, links: "${{ steps.links.outputs.links }}") %>

@@ -1,0 +1,15 @@
+<%#
+  Pushes the gem to RubyGems with OIDC trusted publishing and
+  SLSA attestation via rubygems/release-gem. On a dry run, builds without
+  pushing. Assumes Ruby is already set up.
+-%>
+- name: Publish gem with attestation
+  uses: rubygems/release-gem@052cc82692552de3ef2b81fd670e41d13cba8092 # v1.4.0
+  with:
+    await-release: ${{ inputs.dry_run == 'true' && 'false' || 'true' }}
+    setup-trusted-publisher: ${{ inputs.dry_run == 'true' && 'false' || 'true' }}
+    attestations: ${{ inputs.dry_run == 'true' && 'false' || 'true' }}
+    working-directory: ${{ inputs.working_directory }}
+  env:
+    GITHUB_TOKEN: ${{ github.token }}
+    DRY_RUN: ${{ inputs.dry_run }}

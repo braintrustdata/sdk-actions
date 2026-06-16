@@ -1,0 +1,37 @@
+<%#
+  Posts $TEXT (Slack mrkdwn) to a channel via the chat.postMessage API.
+  Pair it with a step (id: message) that writes the message to its `text` output.
+
+  @param token         [String] expr for the bot token.    Default: ${{ inputs.slack_token }}
+  @param channel       [String] expr for the channel ID.   Default: ${{ inputs.slack_channel }}
+  @param text          [String] expr for the message text. Default: ${{ steps.message.outputs.text }}
+  @param fail_on_error [String] "true" fails the step on a Slack API error, else warns. Default: false
+-%>
+- name: Send Slack message
+  shell: bash
+  env:
+    SLACK_BOT_TOKEN: <%= locals.fetch(:token) { "${{ inputs.slack_token }}" } %>
+    SLACK_CHANNEL: <%= locals.fetch(:channel) { "${{ inputs.slack_channel }}" } %>
+    TEXT: <%= locals.fetch(:text) { "${{ steps.message.outputs.text }}" } %>
+    FAIL_ON_ERROR: <%= locals.fetch(:fail_on_error) { "'false'" } %>
+  run: |
+    # Self-guard: no-op when Slack isn't configured, so callers needn't gate this step.
+    if [ -z "$SLACK_BOT_TOKEN" ] || [ -z "$SLACK_CHANNEL" ]; then
+      echo "Slack not configured; skipping notification."
+      exit 0
+    fi
+    # jq --arg passes strings literally, so \n must be real newlines before encoding
+    TEXT=$(printf '%b' "$TEXT")
+    RESPONSE=$(curl -s --max-time 10 -X POST "https://slack.com/api/chat.postMessage" \
+      -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+      -H "Content-Type: application/json; charset=utf-8" \
+      -d "$(jq -n --arg channel "$SLACK_CHANNEL" --arg text "$TEXT" \
+        '{channel: $channel, text: $text}')") || true
+    if echo "$RESPONSE" | jq -e '.ok' > /dev/null 2>&1; then
+      echo "Slack notification sent."
+    elif [ "$FAIL_ON_ERROR" = "true" ]; then
+      echo "Slack notification failed: $RESPONSE"
+      exit 1
+    else
+      echo "::warning::Slack notification failed: $RESPONSE"
+    fi

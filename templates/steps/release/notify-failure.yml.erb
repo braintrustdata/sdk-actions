@@ -1,0 +1,33 @@
+<%#
+  Builds a release-failure Slack message and sends it. Composed into
+  a language's terminal on-failure handler; the caller stamps the `failure()`
+  guard, and slack/send self-guards when Slack isn't configured.
+
+  @param failed_step [String] expr for the failing step's name. Default: ${{ inputs.step }}
+  @param mention     [String] expr for an optional @mention.    Default: ${{ inputs.slack_mention }}
+-%>
+- name: Build failure message
+  id: message-failure
+  shell: bash
+  env:
+    RELEASE_TAG: ${{ inputs.release_tag }}
+    STEP: <%= locals.fetch(:failed_step) { "${{ inputs.step }}" } %>
+    SLACK_MENTION: <%= locals.fetch(:mention) { "${{ inputs.slack_mention }}" } %>
+    RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    ACTOR_LINK: <${{ github.server_url }}/${{ github.actor }}|${{ github.actor }}>
+  run: |
+    TEXT=":x: *$GITHUB_REPOSITORY $RELEASE_TAG* failed at $STEP"
+    TEXT="$TEXT\nInitiated by: $ACTOR_LINK"
+
+    if [ -n "$SLACK_MENTION" ]; then
+      TEXT="$TEXT  $SLACK_MENTION"
+    fi
+
+    TEXT="$TEXT\n<$RUN_URL|View failed run>"
+
+    { echo 'text<<SLACK_DELIMITER'
+      printf '%s\n' "$TEXT"
+      echo 'SLACK_DELIMITER'
+    } >> $GITHUB_OUTPUT
+
+<%= render_step('slack/send', indent: 0, text: "${{ steps.message-failure.outputs.text }}") %>

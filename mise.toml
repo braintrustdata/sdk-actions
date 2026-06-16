@@ -1,0 +1,6 @@
+# Toolchain for developing this repo (and CI). `mise install` provisions it all.
+# This is the single source of truth for tool versions — CI reads it too.
+[tools]
+ruby = "4.0"
+python = "3.13"
+"pipx:check-jsonschema" = "0.37.3"

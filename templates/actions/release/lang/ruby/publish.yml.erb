@@ -1,0 +1,94 @@
+name: Publish Ruby SDK Release
+description: >
+  Full Ruby gem release: checks out the SHA, pushes to RubyGems, creates
+  a GitHub release, and sends a Slack completion notification. Covers the
+  standard publish sequence for all Braintrust Ruby gems.
+
+inputs:
+  sha:
+    description: "Commit SHA to check out and release"
+    required: true
+  checkout:
+    description: "Check out the SHA before publishing. Set to false when the caller has already checked out and patched files."
+    required: false
+    default: 'true'
+  working_directory:
+    description: "Path to the gem root (where Gemfile and gemspec live)"
+    required: false
+    default: '.'
+  ruby_version:
+    description: "Ruby version to use"
+    required: false
+    default: '4.0'
+  dry_run:
+    description: "Skip gem push, tag push, and GitHub release creation"
+    required: false
+    default: 'false'
+  release_tag:
+    description: "The release tag (e.g. v0.3.2)"
+    required: true
+  github_release:
+    description: "Whether to create a GitHub release"
+    required: false
+    default: 'true'
+  notes:
+    description: "Base64-encoded release notes from the prepare action"
+    required: false
+    default: ''
+  prev_release:
+    description: "Previous release tag — used in completion notification"
+    required: false
+    default: ''
+  branch:
+    description: "Branch the release was made from"
+    required: true
+  on_release_branch:
+    description: "Whether the SHA is on an expected release branch"
+    required: true
+  pr_list:
+    description: "x1f-delimited PR list from prepare action"
+    required: false
+    default: ''
+  gem_name:
+    description: "RubyGems gem name — used to build the RubyGems link in notifications"
+    required: false
+    default: ''
+  slack_token:
+    description: "Slack bot token"
+    required: false
+    default: ''
+  slack_channel:
+    description: "Slack channel ID"
+    required: false
+    default: ''
+  slack_mention:
+    description: "Optional Slack handle or group to @mention on completion"
+    required: false
+    default: ''
+  failure_slack_mention:
+    description: "Optional Slack handle or group to @mention if the gem push fails"
+    required: false
+    default: ''
+  emoji:
+    description: "Emoji prefix for Slack messages"
+    required: false
+    default: ':ruby:'
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      if: ${{ inputs.checkout == 'true' }}
+      with:
+        ref: ${{ inputs.sha }}
+        fetch-depth: 0
+
+<%= render_step('lang/ruby/setup') %>
+
+<%= render_step('release/lang/ruby/rubygems-push') %>
+
+<%= render_step('release/create-github-release') %>
+
+<%= render_step('release/lang/ruby/notify-published') %>
+
+<%= render_step('release/lang/ruby/on-failure', if: "${{ failure() }}") %>

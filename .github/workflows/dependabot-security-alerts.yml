@@ -61,7 +61,7 @@ jobs:
             -H "Accept: application/vnd.github+json" \
             -H "X-GitHub-Api-Version: 2026-03-10" \
             "/repos/${GH_REPO}/dependabot/alerts?state=open&per_page=100" \
-            --jq '([.[] | length] | add) // 0')"
+            | jq '([.[] | length] | add) // 0')"
           echo "count=${count}" >> "${GITHUB_OUTPUT}"
 
       - name: Send Slack message

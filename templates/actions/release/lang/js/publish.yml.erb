@@ -94,6 +94,13 @@ inputs:
     description: "npm package name — used to build the npm link in notifications"
     required: false
     default: ''
+  label:
+    description: >
+      Display name for release notifications (e.g. the package name). When set, it
+      becomes the notification subject instead of the repository — useful when a repo
+      publishes multiple packages. Defaults to the repository.
+    required: false
+    default: ''
   slack_token:
     description: "Slack bot token"
     required: false

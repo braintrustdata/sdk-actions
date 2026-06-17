@@ -10,6 +10,7 @@
   shell: bash
   env:
     TAG: ${{ inputs.release_tag }}
+    LABEL: ${{ inputs.label }}
     PREV_RELEASE: ${{ inputs.prev_release }}
     BRANCH: ${{ inputs.branch }}
     ON_RELEASE_BRANCH: ${{ inputs.on_release_branch }}
@@ -20,10 +21,16 @@
     RELEASE_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$TAG"
     BRANCH_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/tree/$BRANCH"
 
+    # Subject is the package label when set (disambiguates repos that publish
+    # multiple packages); otherwise the repository. The repo is still present in
+    # every link below, so it is never lost.
+    SUBJECT="$GITHUB_REPOSITORY"
+    [ -n "$LABEL" ] && SUBJECT="$LABEL"
+
     if [ "$DRY_RUN" = "true" ]; then
-      echo "## $GITHUB_REPOSITORY $TAG — dry run complete" >> $GITHUB_STEP_SUMMARY
+      echo "## $SUBJECT $TAG — dry run complete" >> $GITHUB_STEP_SUMMARY
     else
-      echo "## $GITHUB_REPOSITORY $TAG — published ✅" >> $GITHUB_STEP_SUMMARY
+      echo "## $SUBJECT $TAG — published ✅" >> $GITHUB_STEP_SUMMARY
     fi
     echo "" >> $GITHUB_STEP_SUMMARY
 
@@ -63,6 +70,7 @@
   shell: bash
   env:
     TAG: ${{ inputs.release_tag }}
+    LABEL: ${{ inputs.label }}
     EMOJI: ${{ inputs.emoji }}
     BRANCH: ${{ inputs.branch }}
     ON_RELEASE_BRANCH: ${{ inputs.on_release_branch }}
@@ -75,6 +83,10 @@
   run: |
     RELEASE_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$TAG"
 
+    # Subject is the package label when set, else the repository (see summary step).
+    SUBJECT="$GITHUB_REPOSITORY"
+    [ -n "$LABEL" ] && SUBJECT="$LABEL"
+
     DIFF_PART=""
     if [ -n "$PREV_RELEASE" ]; then
       DIFF_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/${PREV_RELEASE}...$TAG"
@@ -84,10 +96,10 @@
     PR_LIST=$(echo "$PR_LIST_RAW" | tr $'\x1f' '\n' | sed '/^$/d')
 
     if [ "$DRY_RUN" = "true" ]; then
-      TEXT="$EMOJI *$GITHUB_REPOSITORY $TAG* complete"
+      TEXT="$EMOJI *$SUBJECT $TAG* complete"
       TEXT="$TEXT\n> :information_source: _Dry run: nothing tagged or published._"
     else
-      TEXT="$EMOJI *$GITHUB_REPOSITORY $TAG* published"
+      TEXT="$EMOJI *$SUBJECT $TAG* published"
     fi
 
     if [ "$ON_RELEASE_BRANCH" = "false" ]; then

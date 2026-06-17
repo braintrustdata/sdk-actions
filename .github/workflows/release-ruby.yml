@@ -177,6 +177,7 @@ jobs:
           slack_token: ${{ github.event_name != 'pull_request' && secrets.SLACK_BOT_TOKEN || '' }}
           slack_channel: ${{ github.event_name != 'pull_request' && vars.SLACK_SDK_RELEASE_CHANNEL || '' }}
           # slack_mention: '@sdk-eng'
+          label: bt-publishing-test # distinguishes this from other packages in this repo
           emoji: ':ruby:'
 
   publish:
@@ -234,3 +235,4 @@ jobs:
           # slack_mention: '@sdk-eng'
           # failure_slack_mention: '@sdk-eng'
           gem_name: bt-publishing-test
+          label: bt-publishing-test # distinguishes this from other packages in this repo

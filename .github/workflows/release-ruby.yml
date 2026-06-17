@@ -14,11 +14,11 @@
 # ─────────────────────────────────────────────────────────────────────────────
 #
 # GitHub Environments (repo Settings → Environments):
-#   rubygems-publish
+#   publish
 #     - Required reviewers: sdk-eng team or named maintainers
 #     - Prevent self-review: enabled
 #     - Deployment branches: main only
-#   rubygems-publish-dry-run
+#   publish-dry-run
 #     - Required reviewers: at least yourself (to test the approval gate)
 #     - Allow administrators to bypass: enabled (for testing flexibility)
 #     - Deployment branches: no restriction
@@ -34,7 +34,7 @@
 #   Configure for your gem at rubygems.org → gem settings → Trusted Publishers
 #   Repository:  braintrustdata/sdk-actions  (or your SDK repo)
 #   Workflow:    release-ruby.yml            (or your workflow filename)
-#   Environment: rubygems-publish
+#   Environment: publish
 #
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -185,7 +185,7 @@ jobs:
     # `cond && '' || X` would fall through to X (the '' is falsy).
     environment: >-
       ${{ github.event_name != 'pull_request'
-          && (inputs.dry_run && 'rubygems-publish-dry-run' || 'rubygems-publish')
+          && (inputs.dry_run && 'publish-dry-run' || 'publish')
           || '' }}
     permissions:
       contents: write

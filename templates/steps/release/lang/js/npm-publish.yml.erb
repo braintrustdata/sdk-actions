@@ -1,0 +1,40 @@
+<%#
+  Publishes the package to the npm registry with OIDC trusted
+  publishing (no token) and, optionally, provenance/attestation. On a dry run,
+  packs without pushing. Self-guards on the `npm` toggle and `dry_run` in shell,
+  so the composing action needs no `if:` on it. Assumes Node + the package
+  manager are already set up and the package is built.
+
+  npm is pinned to inputs.npm_version (not @latest): tokenless OIDC trusted
+  publishing requires npm >= 11.5.1, which is newer than the npm bundled with
+  setup-node. Provenance requires a public package and `id-token: write`.
+-%>
+- name: Publish to npm
+  shell: bash
+  working-directory: ${{ inputs.working_directory }}
+  env:
+    NPM_ENABLED: ${{ inputs.npm }}
+    DRY_RUN: ${{ inputs.dry_run }}
+    CHANNEL: ${{ inputs.channel }}
+    ACCESS: ${{ inputs.access }}
+    PROVENANCE: ${{ inputs.provenance }}
+    REGISTRY: ${{ inputs.registry }}
+    NPM_VERSION: ${{ inputs.npm_version }}
+    # Force OIDC trusted publishing: clear any inherited token so npm can't fall
+    # back to token auth.
+    NODE_AUTH_TOKEN: ''
+    NPM_TOKEN: ''
+  run: |
+    if [ "$NPM_ENABLED" != "true" ]; then
+      echo "npm publishing disabled; skipping."
+      exit 0
+    fi
+    npm install -g "npm@$NPM_VERSION"
+    ARGS=(--tag "$CHANNEL" --access "$ACCESS" --registry "$REGISTRY")
+    [ "$PROVENANCE" = "true" ] && ARGS+=(--provenance)
+    if [ "$DRY_RUN" = "true" ]; then
+      echo "DRY RUN: npm publish ${ARGS[*]} --dry-run"
+      npm publish "${ARGS[@]}" --dry-run
+    else
+      npm publish "${ARGS[@]}"
+    fi

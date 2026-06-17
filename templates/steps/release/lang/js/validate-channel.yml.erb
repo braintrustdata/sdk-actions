@@ -1,0 +1,21 @@
+<%#
+  Fails unless the requested npm release channel (dist-tag) is a member
+  of the comma-separated allowlist. Composed into the validate action so an
+  unknown channel fails fast, before the approval gate. Parallels the
+  release_branch membership check in release/validate.
+
+  @param channel          [String] expr for the requested channel.  Default: ${{ inputs.channel }}
+  @param allowed_channels [String] expr for the allowed channel set. Default: ${{ inputs.allowed_channels }}
+-%>
+- name: Validate release channel
+  shell: bash
+  env:
+    CHANNEL: <%= locals.fetch(:channel) { "${{ inputs.channel }}" } %>
+    ALLOWED: <%= locals.fetch(:allowed_channels) { "${{ inputs.allowed_channels }}" } %>
+  run: |
+    IFS=',' read -ra OK <<< "$ALLOWED"
+    for c in "${OK[@]}"; do
+      [ "$(echo "$c" | xargs)" = "$CHANNEL" ] && exit 0
+    done
+    echo "Error: release channel '$CHANNEL' is not in the allowed set: $ALLOWED"
+    exit 1

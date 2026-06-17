@@ -1,11 +1,56 @@
-# Placeholder so the release-js.yml workflow_dispatch trigger is registered on the
-# default branch. This lets the full workflow be dispatched from its feature branch
-# ("Use workflow from: <branch>") before merge. The functional workflow — which
-# publishes the @braintrust/bt-fake dummy npm package end-to-end — replaces this
-# stub when the JavaScript release PR lands.
-name: Release JavaScript (@braintrust/bt-fake)
+#
+# Releases @braintrust/bt-publishing-test — a dummy npm package used to validate Braintrust
+# release workflow tooling end-to-end. This does NOT release any real Braintrust
+# JavaScript SDK.
+#
+# This workflow serves two purposes:
+#   1. End-to-end testing of the composite actions in actions/release/
+#   2. Reference implementation of the JavaScript-specific release template
+#
+# Generic steps are provided by composite actions in actions/release/.
+# Only the sections marked with inline comments need to change for other packages.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# SETUP REQUIREMENTS
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# GitHub Environments (repo Settings → Environments):
+#   publish
+#     - Required reviewers: sdk-eng team or named maintainers
+#     - Prevent self-review: enabled
+#     - Deployment branches: main only
+#   publish-dry-run
+#     - Required reviewers: at least yourself (to test the approval gate)
+#     - Allow administrators to bypass: enabled (for testing flexibility)
+#     - Deployment branches: no restriction
+#
+# Repository Variables (Settings → Secrets and variables → Variables):
+#   SLACK_SDK_RELEASE_CHANNEL   Slack channel ID for release notifications
+#
+# Repository Secrets (Settings → Secrets and variables → Secrets):
+#   SLACK_BOT_TOKEN             Org-level secret — Brainbot Slack app token
+#                               Must be invited to SLACK_SDK_RELEASE_CHANNEL
+#
+# npm Trusted Publishing (OIDC — no token needed):
+#   Configure for your package at npmjs.com → package → Settings → Trusted Publisher
+#   Organization/User: @braintrust         (or your npm scope/owner)
+#   Repository:        braintrustdata/sdk-actions  (or your SDK repo)
+#   Workflow:          release-js.yml       (or your workflow filename)
+#   Environment:       publish
+#   Provenance requires a PUBLIC package; the publish job needs id-token: write.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: Release JavaScript (@braintrust/bt-publishing-test)
 
 on:
+  # Auto dry-run on PRs that touch the generated actions or the workflows, to
+  # smoke-test the actions end-to-end. (A template edited without regenerating
+  # is caught separately by the CI check-generated job, which runs on every PR.)
+  pull_request:
+    paths:
+      - 'actions/**'
+      - '.github/workflows/**'
   workflow_dispatch:
     inputs:
       _instructions:
@@ -30,6 +75,8 @@ on:
         description: "Anchor for release notes: a tag name or commit SHA. If SHA, notes will be empty."
         type: string
         required: false
+        # bt-publishing-test: fixed SHA anchor prevents indefinite changelog accumulation.
+        # Update this when you want to reset the notes baseline.
         default: '58a397193105516446c3042361913655bcece509'
       dry_run:
         description: "Dry run: Build without tagging or publishing"
@@ -37,10 +84,169 @@ on:
         default: false
 
 jobs:
-  placeholder:
+  bump:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    outputs:
+      version: ${{ steps.bump.outputs.version }}
+    steps:
+      # bt-publishing-test: derives next version by querying npm and incrementing the patch.
+      # Falls back to 0.0.1 on first publish (package not found). Remove this job
+      # in real SDK workflows; version comes from the version bump PR.
+      - name: Bump version
+        id: bump
+        run: |
+          # Package may not exist yet (first release / new name); default to 0.0.0
+          # so the first publish is 0.0.1.
+          CURRENT=$(npm view @braintrust/bt-publishing-test version 2>/dev/null || echo "0.0.0")
+          CURRENT=${CURRENT:-0.0.0}
+          IFS='.' read -r major minor patch <<< "$CURRENT"
+          echo "version=$major.$minor.$((patch + 1))" >> $GITHUB_OUTPUT
+
+  validate:
+    needs: bump
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      release_tag: ${{ steps.validate-release.outputs.release_tag }}
+      prev_release: ${{ steps.validate-release.outputs.prev_release }}
+      branch: ${{ steps.validate-release.outputs.branch }}
+      on_release_branch: ${{ steps.validate-release.outputs.on_release_branch }}
+      commit_message: ${{ steps.validate-release.outputs.commit_message }}
+    steps:
+      # bt-publishing-test: checkout required to resolve local ./actions/... references.
+      # Real SDK workflows use external braintrustdata/sdk-actions/...@sha references
+      # and do not need this step.
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Validate release
+        id: validate-release
+        uses: ./actions/release/lang/js/validate
+        with:
+          # bt-publishing-test: version passed directly from bump job — no package.json read needed.
+          # In a real JS project, drop `version`; it is read from package.json.
+          version: ${{ needs.bump.outputs.version }}
+          sha: ${{ inputs.sha || github.event.pull_request.head.sha }}
+          dry_run: ${{ inputs.dry_run || github.event_name == 'pull_request' }}
+          working_directory: test/release/js
+          package_manager: pnpm
+          channel: ${{ inputs.channel || 'latest' }}
+          allowed_channels: 'latest,rc,next,beta'
+
+  prepare:
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write  # required for releases/generate-notes API
+    outputs:
+      pr_list: ${{ steps.prepare.outputs.pr_list }}
+      notes: ${{ steps.prepare.outputs.notes }}
+    steps:
+      # bt-publishing-test: checkout required because actions are referenced locally (./actions/...).
+      # Real SDK workflows reference actions externally (braintrustdata/sdk-actions/...@sha)
+      # and do not need this step.
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Prepare release
+        id: prepare
+        uses: ./actions/release/prepare
+        with:
+          release_tag: ${{ needs.validate.outputs.release_tag }}
+          sha: ${{ inputs.sha || github.event.pull_request.head.sha }}
+          # On PR auto dry-runs, anchor notes to the head SHA: prepare treats a
+          # full SHA as "notes unavailable" (no tag range), so the changelog
+          # doesn't accumulate in the step summary on every PR.
+          prev_release: ${{ inputs.prev_release || github.event.pull_request.head.sha || needs.validate.outputs.prev_release }}
+
+  notify-pending:
+    needs: [validate, prepare]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions: {}
     steps:
-      - name: Placeholder
-        run: echo "Placeholder — registers workflow_dispatch. The functional release-js.yml lands in the JavaScript release PR."
+      # bt-publishing-test: checkout required for local action resolution (see prepare job comment)
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Notify release pending
+        uses: ./actions/release/notify-pending
+        with:
+          sha: ${{ inputs.sha || github.event.pull_request.head.sha }}
+          release_tag: ${{ needs.validate.outputs.release_tag }}
+          prev_release: ${{ needs.validate.outputs.prev_release }}
+          branch: ${{ needs.validate.outputs.branch }}
+          on_release_branch: ${{ needs.validate.outputs.on_release_branch }}
+          commit_message: ${{ needs.validate.outputs.commit_message }}
+          pr_list: ${{ needs.prepare.outputs.pr_list }}
+          notes: ${{ needs.prepare.outputs.notes }}
+          dry_run: ${{ inputs.dry_run || github.event_name == 'pull_request' }}
+          # Suppress Slack on PR auto dry-runs (still exercises message-building; just no real post).
+          # Gate on != pull_request: GHA's `A && '' || B` returns B (the '' is falsy), so suppression
+          # must be the trailing '' branch, not the "true" value.
+          slack_token: ${{ github.event_name != 'pull_request' && secrets.SLACK_BOT_TOKEN || '' }}
+          slack_channel: ${{ github.event_name != 'pull_request' && vars.SLACK_SDK_RELEASE_CHANNEL || '' }}
+          # slack_mention: '@sdk-eng'
+          emoji: ':javascript:'
+
+  publish:
+    needs: [bump, validate, prepare, notify-pending]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    # No environment on PR dry-runs (avoids the approval gate AND the accumulating
+    # deployment records); the gated environments apply only to manual dispatch.
+    # Note the structure: empty must be the trailing `|| ''` branch, since GHA's
+    # `cond && '' || X` would fall through to X (the '' is falsy).
+    environment: >-
+      ${{ github.event_name != 'pull_request'
+          && (inputs.dry_run && 'publish-dry-run' || 'publish')
+          || '' }}
+    permissions:
+      contents: write
+      id-token: write  # OIDC trusted publishing + provenance
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.sha || github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      # bt-publishing-test: write the run-number version into package.json. The publish job
+      # checks out fresh, so the file still reflects the placeholder version.
+      # Real SDK workflows omit this — the version is committed in the bump PR.
+      # (No lockfile patch needed: pnpm-lock.yaml doesn't record the package's own version.)
+      - name: Apply version to package.json
+        env:
+          VERSION: ${{ needs.bump.outputs.version }}
+        run: |
+          node -e 'const fs=require("fs");const f="test/release/js/package.json";const p=JSON.parse(fs.readFileSync(f,"utf8"));p.version=process.env.VERSION;fs.writeFileSync(f,JSON.stringify(p,null,2)+"\n")'
+
+      - name: Publish
+        uses: ./actions/release/lang/js/publish
+        with:
+          sha: ${{ inputs.sha || github.event.pull_request.head.sha }}
+          checkout: 'false' # bt-publishing-test: skip internal checkout — version patching above must survive into the build
+          working_directory: test/release/js
+          package_manager: pnpm
+          dry_run: ${{ inputs.dry_run || github.event_name == 'pull_request' }}
+          release_tag: ${{ needs.validate.outputs.release_tag }}
+          github_release: 'false' # bt-publishing-test: omit GitHub release to avoid tag/release pollution from repeated test runs
+          version: ${{ needs.bump.outputs.version }}
+          package_name: '@braintrust/bt-publishing-test'
+          access: 'public'
+          provenance: 'true'
+          channel: ${{ inputs.channel || 'latest' }}
+          notes: ${{ needs.prepare.outputs.notes }}
+          prev_release: ${{ needs.validate.outputs.prev_release }}
+          branch: ${{ needs.validate.outputs.branch }}
+          on_release_branch: ${{ needs.validate.outputs.on_release_branch }}
+          pr_list: ${{ needs.prepare.outputs.pr_list }}
+          # Suppress Slack on PR auto dry-runs (still exercises message-building; just no real post).
+          # Gate on != pull_request: GHA's `A && '' || B` returns B (the '' is falsy), so suppression
+          # must be the trailing '' branch, not the "true" value.
+          slack_token: ${{ github.event_name != 'pull_request' && secrets.SLACK_BOT_TOKEN || '' }}
+          slack_channel: ${{ github.event_name != 'pull_request' && vars.SLACK_SDK_RELEASE_CHANNEL || '' }}
+          # slack_mention: '@sdk-eng'
+          # failure_slack_mention: '@sdk-eng'
+          emoji: ':javascript:'

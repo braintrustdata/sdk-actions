@@ -1,0 +1,21 @@
+<%#
+  Resolves the package version into a `version` output. Uses the
+  explicit override when given, otherwise reads the `version` field from
+  package.json. Sets id: read-version. Run from the package root.
+
+  @param version           [String] expr for an explicit version override. Default: ${{ inputs.version }}
+  @param working_directory [String] expr for the package root.             Default: ${{ inputs.working_directory }}
+-%>
+- name: Read version
+  id: read-version
+  shell: bash
+  working-directory: <%= locals.fetch(:working_directory) { "${{ inputs.working_directory }}" } %>
+  env:
+    VERSION_OVERRIDE: <%= locals.fetch(:version) { "${{ inputs.version }}" } %>
+  run: |
+    if [ -n "$VERSION_OVERRIDE" ]; then
+      echo "version=$VERSION_OVERRIDE" >> $GITHUB_OUTPUT
+    else
+      VERSION=$(node -p "require('./package.json').version")
+      echo "version=$VERSION" >> $GITHUB_OUTPUT
+    fi

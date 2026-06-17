@@ -9,9 +9,9 @@ Shared GitHub actions and workflows for Braintrust SDK repositories.
 ### Adopting the release workflow
 
 1. **Copy the canonical template** for your language into your repo's
-   `.github/workflows/`. For Ruby that's
-   [`release-ruby.yml`](.github/workflows/release-ruby.yml) — it doubles as this
-   repo's end-to-end test and the reference implementation.
+   `.github/workflows/`:
+      - [`release-js.yml`](.github/workflows/release-js.yml)
+      - [`release-ruby.yml`](.github/workflows/release-ruby.yml)
 2. **Adapt the marked sections** — version source, gem name, working directory,
    and so on. The template's comments flag exactly what changes per repo;
    everything else is provided by the pinned actions.
@@ -33,6 +33,8 @@ pulls in everything it needs.
 |---|---|
 | `release/lang/ruby/publish` | Push the gem to RubyGems, create the GitHub release, and notify |
 | `release/lang/ruby/validate` | Check out the SHA, set up Ruby, read the version, validate the release (tag/branch/metadata), lint + build |
+| `release/lang/js/publish` | Publish the package to npm (OIDC trusted publishing), create the GitHub release, and notify |
+| `release/lang/js/validate` | Check out the SHA, set up Node + package manager, read the version, validate the release (channel/tag/branch/metadata), build |
 | `release/notify-pending` | Post the pre-approval job summary and Slack notification |
 | `release/prepare` | Fetch the PR list and release notes |
 

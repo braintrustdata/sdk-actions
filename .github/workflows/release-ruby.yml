@@ -14,11 +14,11 @@
 # ─────────────────────────────────────────────────────────────────────────────
 #
 # GitHub Environments (repo Settings → Environments):
-#   rubygems-publish
+#   publish
 #     - Required reviewers: sdk-eng team or named maintainers
 #     - Prevent self-review: enabled
 #     - Deployment branches: main only
-#   rubygems-publish-dry-run
+#   publish-dry-run
 #     - Required reviewers: at least yourself (to test the approval gate)
 #     - Allow administrators to bypass: enabled (for testing flexibility)
 #     - Deployment branches: no restriction
@@ -34,13 +34,20 @@
 #   Configure for your gem at rubygems.org → gem settings → Trusted Publishers
 #   Repository:  braintrustdata/sdk-actions  (or your SDK repo)
 #   Workflow:    release-ruby.yml            (or your workflow filename)
-#   Environment: rubygems-publish
+#   Environment: publish
 #
 # ─────────────────────────────────────────────────────────────────────────────
 
 name: Release Ruby (bt-fake)
 
 on:
+  # Auto dry-run on PRs that touch the generated actions or the workflows, to
+  # smoke-test the actions end-to-end. (A template edited without regenerating
+  # is caught separately by the CI check-generated job, which runs on every PR.)
+  pull_request:
+    paths:
+      - 'actions/**'
+      - '.github/workflows/**'
   workflow_dispatch:
     inputs:
       _instructions:
@@ -109,8 +116,8 @@ jobs:
           #   version_file: lib/your_gem/version.rb
           #   version_module: YourGem
           version: ${{ needs.bump.outputs.version }}
-          sha: ${{ inputs.sha }}
-          dry_run: ${{ inputs.dry_run }}
+          sha: ${{ inputs.sha || github.event.pull_request.head.sha }}
+          dry_run: ${{ inputs.dry_run || github.event_name == 'pull_request' }}
           working_directory: test/release/ruby
 
   prepare:
@@ -133,8 +140,11 @@ jobs:
         uses: ./actions/release/prepare
         with:
           release_tag: ${{ needs.validate.outputs.release_tag }}
-          sha: ${{ inputs.sha }}
-          prev_release: ${{ inputs.prev_release || needs.validate.outputs.prev_release }}
+          sha: ${{ inputs.sha || github.event.pull_request.head.sha }}
+          # On PR auto dry-runs, anchor notes to the head SHA: prepare treats a
+          # full SHA as "notes unavailable" (no tag range), so the changelog
+          # doesn't accumulate in the step summary on every PR.
+          prev_release: ${{ inputs.prev_release || github.event.pull_request.head.sha || needs.validate.outputs.prev_release }}
 
   notify-pending:
     needs: [validate, prepare]
@@ -148,7 +158,7 @@ jobs:
       - name: Notify release pending
         uses: ./actions/release/notify-pending
         with:
-          sha: ${{ inputs.sha }}
+          sha: ${{ inputs.sha || github.event.pull_request.head.sha }}
           release_tag: ${{ needs.validate.outputs.release_tag }}
           prev_release: ${{ needs.validate.outputs.prev_release }}
           branch: ${{ needs.validate.outputs.branch }}
@@ -156,9 +166,12 @@ jobs:
           commit_message: ${{ needs.validate.outputs.commit_message }}
           pr_list: ${{ needs.prepare.outputs.pr_list }}
           notes: ${{ needs.prepare.outputs.notes }}
-          dry_run: ${{ inputs.dry_run }}
-          slack_token: ${{ secrets.SLACK_BOT_TOKEN }}
-          slack_channel: ${{ vars.SLACK_SDK_RELEASE_CHANNEL }}
+          dry_run: ${{ inputs.dry_run || github.event_name == 'pull_request' }}
+          # Suppress Slack on PR auto dry-runs (still exercises message-building; just no real post).
+          # Gate on != pull_request: GHA's `A && '' || B` returns B (the '' is falsy), so suppression
+          # must be the trailing '' branch, not the "true" value.
+          slack_token: ${{ github.event_name != 'pull_request' && secrets.SLACK_BOT_TOKEN || '' }}
+          slack_channel: ${{ github.event_name != 'pull_request' && vars.SLACK_SDK_RELEASE_CHANNEL || '' }}
           # slack_mention: '@sdk-eng'
           emoji: ':ruby:'
 
@@ -166,14 +179,21 @@ jobs:
     needs: [bump, validate, prepare, notify-pending]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    environment: ${{ inputs.dry_run && 'rubygems-publish-dry-run' || 'rubygems-publish' }}
+    # No environment on PR dry-runs (avoids the approval gate AND the accumulating
+    # deployment records); the gated environments apply only to manual dispatch.
+    # Note the structure: empty must be the trailing `|| ''` branch, since GHA's
+    # `cond && '' || X` would fall through to X (the '' is falsy).
+    environment: >-
+      ${{ github.event_name != 'pull_request'
+          && (inputs.dry_run && 'publish-dry-run' || 'publish')
+          || '' }}
     permissions:
       contents: write
       id-token: write
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: ${{ inputs.sha }}
+          ref: ${{ inputs.sha || github.event.pull_request.head.sha }}
           fetch-depth: 0
 
       # bt-fake: update both version.rb and Gemfile.lock to the run-number version.
@@ -191,10 +211,10 @@ jobs:
       - name: Publish
         uses: ./actions/release/lang/ruby/publish
         with:
-          sha: ${{ inputs.sha }}
+          sha: ${{ inputs.sha || github.event.pull_request.head.sha }}
           checkout: 'false' # bt-fake: skip internal checkout — version patching above must survive into the gem build
           working_directory: test/release/ruby
-          dry_run: ${{ inputs.dry_run }}
+          dry_run: ${{ inputs.dry_run || github.event_name == 'pull_request' }}
           release_tag: ${{ needs.validate.outputs.release_tag }}
           github_release: 'false' # bt-fake: omit GitHub release to avoid tag/release pollution from repeated test runs
           notes: ${{ needs.prepare.outputs.notes }}
@@ -202,8 +222,11 @@ jobs:
           branch: ${{ needs.validate.outputs.branch }}
           on_release_branch: ${{ needs.validate.outputs.on_release_branch }}
           pr_list: ${{ needs.prepare.outputs.pr_list }}
-          slack_token: ${{ secrets.SLACK_BOT_TOKEN }}
-          slack_channel: ${{ vars.SLACK_SDK_RELEASE_CHANNEL }}
+          # Suppress Slack on PR auto dry-runs (still exercises message-building; just no real post).
+          # Gate on != pull_request: GHA's `A && '' || B` returns B (the '' is falsy), so suppression
+          # must be the trailing '' branch, not the "true" value.
+          slack_token: ${{ github.event_name != 'pull_request' && secrets.SLACK_BOT_TOKEN || '' }}
+          slack_channel: ${{ github.event_name != 'pull_request' && vars.SLACK_SDK_RELEASE_CHANNEL || '' }}
           # slack_mention: '@sdk-eng'
           # failure_slack_mention: '@sdk-eng'
           gem_name: bt-fake

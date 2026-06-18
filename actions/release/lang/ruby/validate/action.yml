@@ -16,7 +16,7 @@ inputs:
   version:
     description: >
       Explicit version override. If provided, version_file and version_module
-      are ignored. Use when the version is computed externally (e.g. bt-fake
+      are ignored. Use when the version is computed externally (e.g. bt-publishing-test
       auto-bump from run number).
     required: false
     default: ''

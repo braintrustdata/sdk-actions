@@ -9,15 +9,15 @@ end
 
 desc "Build gem into pkg/"
 task :build do
-  require_relative "lib/bt_fake/version"
-  sh "gem build bt-fake.gemspec"
+  require_relative "lib/bt_publishing_test/version"
+  sh "gem build bt-publishing-test.gemspec"
   mkdir_p "pkg"
-  mv "bt-fake-#{BtFake::VERSION}.gem", "pkg/"
+  mv "bt-publishing-test-#{BtPublishingTest::VERSION}.gem", "pkg/"
 end
 
 namespace :release do
   task publish: [:lint, :build] do
-    gem_files = FileList["pkg/bt-fake-*.gem"]
+    gem_files = FileList["pkg/bt-publishing-test-*.gem"]
     raise "No gem file found after build" if gem_files.empty?
 
     if ENV["DRY_RUN"] == "true"
@@ -29,8 +29,8 @@ namespace :release do
   end
 
   task :push_tag do
-    require_relative "lib/bt_fake/version"
-    tag = "v#{BtFake::VERSION}"
+    require_relative "lib/bt_publishing_test/version"
+    tag = "v#{BtPublishingTest::VERSION}"
     if ENV["DRY_RUN"] == "true"
       puts "DRY RUN: would push tag #{tag} to origin (skipped)"
     else
@@ -42,7 +42,7 @@ namespace :release do
 end
 
 # Called by rubygems/release-gem in the release workflow.
-# bt-fake: tag push omitted to avoid tag pollution from repeated test runs.
+# bt-publishing-test: tag push omitted to avoid tag pollution from repeated test runs.
 # In real SDK workflows, include "release:push_tag" here.
 task release: ["release:publish"] do
   puts "✓ Release complete"

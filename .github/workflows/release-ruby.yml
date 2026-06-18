@@ -1,5 +1,5 @@
 #
-# Releases bt-fake — a dummy Ruby gem used to validate Braintrust release
+# Releases bt-publishing-test — a dummy Ruby gem used to validate Braintrust release
 # workflow tooling end-to-end. This does NOT release the braintrust Ruby SDK.
 #
 # This workflow serves two purposes:
@@ -38,7 +38,7 @@
 #
 # ─────────────────────────────────────────────────────────────────────────────
 
-name: Release Ruby (bt-fake)
+name: Release Ruby (bt-publishing-test)
 
 on:
   # Auto dry-run on PRs that touch the generated actions or the workflows, to
@@ -63,7 +63,7 @@ on:
         description: "Anchor for release notes: a tag name or commit SHA. If SHA, notes will be empty."
         type: string
         required: false
-        # bt-fake: fixed SHA anchor prevents indefinite changelog accumulation.
+        # bt-publishing-test: fixed SHA anchor prevents indefinite changelog accumulation.
         # Update this when you want to reset the notes baseline.
         default: '58a397193105516446c3042361913655bcece509'
       dry_run:
@@ -79,13 +79,17 @@ jobs:
     outputs:
       version: ${{ steps.bump.outputs.version }}
     steps:
-      # bt-fake: derives next version by querying RubyGems.org and incrementing the
+      # bt-publishing-test: derives next version by querying RubyGems.org and incrementing the
       # patch. Falls back to 0.0.1 on first publish (404). Remove this job in real
       # SDK workflows; version comes from the version bump PR.
       - name: Bump version
         id: bump
         run: |
-          CURRENT=$(curl -sf https://rubygems.org/api/v1/gems/bt-fake.json | jq -r '.version' || echo "0.0.0")
+          # Gem may not exist yet (first release / new name) → curl 404s and the
+          # pipeline yields no version; default to 0.0.0 so the first publish is 0.0.1.
+          # (Robust whether or not the shell has pipefail set.)
+          CURRENT=$(curl -sf https://rubygems.org/api/v1/gems/bt-publishing-test.json 2>/dev/null | jq -r '.version // empty' 2>/dev/null || true)
+          CURRENT=${CURRENT:-0.0.0}
           IFS='.' read -r major minor patch <<< "$CURRENT"
           echo "version=$major.$minor.$((patch + 1))" >> $GITHUB_OUTPUT
 
@@ -102,7 +106,7 @@ jobs:
       on_release_branch: ${{ steps.validate-release.outputs.on_release_branch }}
       commit_message: ${{ steps.validate-release.outputs.commit_message }}
     steps:
-      # bt-fake: checkout required to resolve local ./actions/... references.
+      # bt-publishing-test: checkout required to resolve local ./actions/... references.
       # Real SDK workflows use external braintrustdata/sdk-actions/...@sha references
       # and do not need this step.
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -111,7 +115,7 @@ jobs:
         id: validate-release
         uses: ./actions/release/lang/ruby/validate
         with:
-          # bt-fake: version passed directly from bump job — no version file needed.
+          # bt-publishing-test: version passed directly from bump job — no version file needed.
           # In a real Ruby project, replace `version` with:
           #   version_file: lib/your_gem/version.rb
           #   version_module: YourGem
@@ -130,7 +134,7 @@ jobs:
       pr_list: ${{ steps.prepare.outputs.pr_list }}
       notes: ${{ steps.prepare.outputs.notes }}
     steps:
-      # bt-fake: checkout required because actions are referenced locally (./actions/...).
+      # bt-publishing-test: checkout required because actions are referenced locally (./actions/...).
       # Real SDK workflows reference actions externally (braintrustdata/sdk-actions/...@sha)
       # and do not need this step.
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -152,7 +156,7 @@ jobs:
     timeout-minutes: 5
     permissions: {}
     steps:
-      # bt-fake: checkout required for local action resolution (see prepare job comment)
+      # bt-publishing-test: checkout required for local action resolution (see prepare job comment)
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Notify release pending
@@ -173,6 +177,7 @@ jobs:
           slack_token: ${{ github.event_name != 'pull_request' && secrets.SLACK_BOT_TOKEN || '' }}
           slack_channel: ${{ github.event_name != 'pull_request' && vars.SLACK_SDK_RELEASE_CHANNEL || '' }}
           # slack_mention: '@sdk-eng'
+          label: bt-publishing-test # distinguishes this from other packages in this repo
           emoji: ':ruby:'
 
   publish:
@@ -196,7 +201,7 @@ jobs:
           ref: ${{ inputs.sha || github.event.pull_request.head.sha }}
           fetch-depth: 0
 
-      # bt-fake: update both version.rb and Gemfile.lock to the run-number version.
+      # bt-publishing-test: update both version.rb and Gemfile.lock to the run-number version.
       # The publish job checks out fresh so both files still reflect the placeholder.
       # Real SDK workflows omit this — both files are committed together in the bump PR.
       - name: Apply version to version.rb and Gemfile.lock
@@ -204,19 +209,19 @@ jobs:
           VERSION: ${{ needs.bump.outputs.version }}
         run: |
           sed -i "s|VERSION = \".*\"|VERSION = \"$VERSION\"|" \
-            test/release/ruby/lib/bt_fake/version.rb
-          sed -i "s|bt-fake ([0-9]*\.[0-9]*\.[0-9]*)|bt-fake ($VERSION)|" \
+            test/release/ruby/lib/bt_publishing_test/version.rb
+          sed -i "s|bt-publishing-test ([0-9]*\.[0-9]*\.[0-9]*)|bt-publishing-test ($VERSION)|" \
             test/release/ruby/Gemfile.lock
 
       - name: Publish
         uses: ./actions/release/lang/ruby/publish
         with:
           sha: ${{ inputs.sha || github.event.pull_request.head.sha }}
-          checkout: 'false' # bt-fake: skip internal checkout — version patching above must survive into the gem build
+          checkout: 'false' # bt-publishing-test: skip internal checkout — version patching above must survive into the gem build
           working_directory: test/release/ruby
           dry_run: ${{ inputs.dry_run || github.event_name == 'pull_request' }}
           release_tag: ${{ needs.validate.outputs.release_tag }}
-          github_release: 'false' # bt-fake: omit GitHub release to avoid tag/release pollution from repeated test runs
+          github_release: 'false' # bt-publishing-test: omit GitHub release to avoid tag/release pollution from repeated test runs
           notes: ${{ needs.prepare.outputs.notes }}
           prev_release: ${{ needs.validate.outputs.prev_release }}
           branch: ${{ needs.validate.outputs.branch }}
@@ -229,4 +234,5 @@ jobs:
           slack_channel: ${{ github.event_name != 'pull_request' && vars.SLACK_SDK_RELEASE_CHANNEL || '' }}
           # slack_mention: '@sdk-eng'
           # failure_slack_mention: '@sdk-eng'
-          gem_name: bt-fake
+          gem_name: bt-publishing-test
+          label: bt-publishing-test # distinguishes this from other packages in this repo

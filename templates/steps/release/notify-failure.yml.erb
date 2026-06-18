@@ -11,12 +11,17 @@
   shell: bash
   env:
     RELEASE_TAG: ${{ inputs.release_tag }}
+    LABEL: ${{ inputs.label }}
     STEP: <%= locals.fetch(:failed_step) { "${{ inputs.step }}" } %>
     SLACK_MENTION: <%= locals.fetch(:mention) { "${{ inputs.slack_mention }}" } %>
     RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     ACTOR_LINK: <${{ github.server_url }}/${{ github.actor }}|${{ github.actor }}>
   run: |
-    TEXT=":x: *$GITHUB_REPOSITORY $RELEASE_TAG* failed at $STEP"
+    # Subject is the package label when set, else the repository.
+    SUBJECT="$GITHUB_REPOSITORY"
+    [ -n "$LABEL" ] && SUBJECT="$LABEL"
+
+    TEXT=":x: *$SUBJECT $RELEASE_TAG* failed at $STEP"
     TEXT="$TEXT\nInitiated by: $ACTOR_LINK"
 
     if [ -n "$SLACK_MENTION" ]; then

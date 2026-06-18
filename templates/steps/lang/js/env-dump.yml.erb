@@ -1,0 +1,23 @@
+<%#
+  Prints environment diagnostics (Node/npm/package-manager versions,
+  the configured registry, the package.json version) to help debug a failed
+  release. Run from the package root.
+
+  @param package_manager   [String] expr for pnpm | npm | yarn. Default: ${{ inputs.package_manager }}
+  @param working_directory [String] expr for the package root.  Default: ${{ inputs.working_directory }}
+-%>
+- name: Dump JavaScript environment
+  shell: bash
+  working-directory: <%= locals.fetch(:working_directory) { "${{ inputs.working_directory }}" } %>
+  env:
+    PM: <%= locals.fetch(:package_manager) { "${{ inputs.package_manager }}" } %>
+  run: |
+    echo "=== Node environment ==="
+    node --version
+    npm --version
+    echo "=== Package manager ($PM) ==="
+    "$PM" --version || echo "(unavailable)"
+    echo "=== Registry ==="
+    npm config get registry
+    echo "=== package.json version ==="
+    node -p "require('./package.json').version" 2>/dev/null || echo "(unavailable)"

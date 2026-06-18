@@ -1,4 +1,4 @@
-name: Publish Ruby SDK Release
+name: Publish Ruby Package
 description: >
   Full Ruby gem release: checks out the SHA, pushes to RubyGems, creates
   a GitHub release, and sends a Slack completion notification. Covers the
@@ -51,6 +51,13 @@ inputs:
     default: ''
   gem_name:
     description: "RubyGems gem name — used to build the RubyGems link in notifications"
+    required: false
+    default: ''
+  label:
+    description: >
+      Display name for release notifications (e.g. the gem name). When set, it becomes
+      the notification subject instead of the repository — useful when a repo publishes
+      multiple packages. Defaults to the repository.
     required: false
     default: ''
   slack_token:

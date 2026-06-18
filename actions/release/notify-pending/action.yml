@@ -52,6 +52,13 @@ inputs:
     description: "Emoji prefix for Slack messages"
     required: false
     default: ':package:'
+  label:
+    description: >
+      Display name for the thing being released (e.g. the package name). When set,
+      it becomes the notification subject instead of the repository — useful when a
+      repo publishes multiple packages. Defaults to the repository.
+    required: false
+    default: ''
 
 runs:
   using: composite
@@ -60,6 +67,7 @@ runs:
       shell: bash
       env:
         TAG: ${{ inputs.release_tag }}
+        LABEL: ${{ inputs.label }}
         COMMIT_MSG: ${{ inputs.commit_message }}
         NOTES_B64: ${{ inputs.notes }}
         BRANCH: ${{ inputs.branch }}
@@ -77,7 +85,12 @@ runs:
           BRANCH_LABEL="$BRANCH_LABEL ⚠️"
         fi
 
-        echo "## $GITHUB_REPOSITORY $TAG" >> $GITHUB_STEP_SUMMARY
+        # Subject is the package label when set, else the repository. The repo
+        # remains in every link below, so it is never lost.
+        SUBJECT="$GITHUB_REPOSITORY"
+        [ -n "$LABEL" ] && SUBJECT="$LABEL"
+
+        echo "## $SUBJECT $TAG" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
 
         if [ "$DRY_RUN" = "true" ]; then
@@ -110,6 +123,7 @@ runs:
       shell: bash
       env:
         TAG: ${{ inputs.release_tag }}
+        LABEL: ${{ inputs.label }}
         EMOJI: ${{ inputs.emoji }}
         BRANCH: ${{ inputs.branch }}
         ON_RELEASE_BRANCH: ${{ inputs.on_release_branch }}
@@ -121,6 +135,10 @@ runs:
         ACTOR_LINK: <${{ github.server_url }}/${{ github.actor }}|${{ github.actor }}>
         PR_LIST_RAW: ${{ inputs.pr_list }}
       run: |
+        # Subject is the package label when set, else the repository.
+        SUBJECT="$GITHUB_REPOSITORY"
+        [ -n "$LABEL" ] && SUBJECT="$LABEL"
+
         BRANCH_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/tree/$BRANCH"
         BRANCH_LINK="<$BRANCH_URL|$BRANCH>"
         if [ "$ON_RELEASE_BRANCH" = "false" ]; then
@@ -137,7 +155,7 @@ runs:
 
         PR_LIST=$(echo "$PR_LIST_RAW" | tr $'\x1f' '\n' | sed '/^$/d')
 
-        TEXT="$EMOJI *$GITHUB_REPOSITORY $TAG* awaiting approval"
+        TEXT="$EMOJI *$SUBJECT $TAG* awaiting approval"
         TEXT="$TEXT\nInitiated by: $ACTOR_LINK"
 
         if [ "$DRY_RUN" = "true" ]; then

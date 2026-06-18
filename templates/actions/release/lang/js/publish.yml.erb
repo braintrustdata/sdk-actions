@@ -1,0 +1,144 @@
+name: Publish JavaScript Package
+description: >
+  Full JavaScript package release: checks out the SHA, sets up Node and the
+  package manager, builds, publishes to npm (OIDC trusted publishing), creates a
+  GitHub release, and sends a Slack completion notification. Covers the standard
+  publish sequence for Braintrust npm packages.
+
+inputs:
+  sha:
+    description: "Commit SHA to check out and release"
+    required: true
+  checkout:
+    description: "Check out the SHA before publishing. Set to false when the caller has already checked out and patched files."
+    required: false
+    default: 'true'
+  working_directory:
+    description: "Path to the package root (where package.json lives)"
+    required: false
+    default: '.'
+  package_manager:
+    description: "Package manager: pnpm | npm | yarn"
+    required: false
+    default: 'pnpm'
+  node_version:
+    description: "Node version to use"
+    required: false
+    default: '22'
+  pnpm_version:
+    description: "pnpm version to install (when package_manager is pnpm)"
+    required: false
+    default: '10.33.0'
+  build_command:
+    description: "npm script to run for the build"
+    required: false
+    default: 'build'
+  dry_run:
+    description: "Skip npm publish, tag push, and GitHub release creation"
+    required: false
+    default: 'false'
+  release_tag:
+    description: "The release tag (e.g. v0.3.2)"
+    required: true
+  version:
+    description: "The package version — used to build the npm link in notifications"
+    required: false
+    default: ''
+  github_release:
+    description: "Whether to create a GitHub release"
+    required: false
+    default: 'true'
+  npm:
+    description: "Whether to publish to the npm registry"
+    required: false
+    default: 'true'
+  registry:
+    description: "npm registry URL"
+    required: false
+    default: 'https://registry.npmjs.org'
+  npm_version:
+    description: "npm version to install before publishing (pinned; >= 11.5.1 for tokenless OIDC trusted publishing)"
+    required: false
+    default: '11.6.2'
+  access:
+    description: "npm publish access: public | restricted (provenance requires public)"
+    required: false
+    default: 'public'
+  provenance:
+    description: "Whether to publish with provenance/attestation (requires a public package)"
+    required: false
+    default: 'true'
+  channel:
+    description: "npm release channel (dist-tag) to publish under"
+    required: false
+    default: 'latest'
+  notes:
+    description: "Base64-encoded release notes from the prepare action"
+    required: false
+    default: ''
+  prev_release:
+    description: "Previous release tag — used in completion notification"
+    required: false
+    default: ''
+  branch:
+    description: "Branch the release was made from"
+    required: true
+  on_release_branch:
+    description: "Whether the SHA is on an expected release branch"
+    required: true
+  pr_list:
+    description: "x1f-delimited PR list from prepare action"
+    required: false
+    default: ''
+  package_name:
+    description: "npm package name — used to build the npm link in notifications"
+    required: false
+    default: ''
+  label:
+    description: >
+      Display name for release notifications (e.g. the package name). When set, it
+      becomes the notification subject instead of the repository — useful when a repo
+      publishes multiple packages. Defaults to the repository.
+    required: false
+    default: ''
+  slack_token:
+    description: "Slack bot token"
+    required: false
+    default: ''
+  slack_channel:
+    description: "Slack channel ID"
+    required: false
+    default: ''
+  slack_mention:
+    description: "Optional Slack handle or group to @mention on completion"
+    required: false
+    default: ''
+  failure_slack_mention:
+    description: "Optional Slack handle or group to @mention if the publish fails"
+    required: false
+    default: ''
+  emoji:
+    description: "Emoji prefix for Slack messages"
+    required: false
+    default: ':package:'
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      if: ${{ inputs.checkout == 'true' }}
+      with:
+        ref: ${{ inputs.sha }}
+        fetch-depth: 0
+
+<%= render_step('lang/js/setup') %>
+
+<%= render_step('lang/js/build') %>
+
+<%= render_step('release/lang/js/npm-publish') %>
+
+<%= render_step('release/create-github-release') %>
+
+<%= render_step('release/lang/js/notify-published') %>
+
+<%= render_step('release/lang/js/on-failure', if: "${{ failure() }}") %>

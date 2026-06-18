@@ -1,0 +1,22 @@
+{
+  "name": "@braintrust/bt-publishing-test",
+  "version": "0.0.1",
+  "description": "Braintrust test package. Used only to validate release workflows end-to-end. Not a real package; do not use.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/braintrustdata/sdk-actions.git"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "scripts": {
+    "build": "node -e \"const fs=require('fs');fs.mkdirSync('dist',{recursive:true});fs.writeFileSync('dist/index.js','export {};\\n');fs.writeFileSync('dist/index.d.ts','export {};\\n')\""
+  }
+}

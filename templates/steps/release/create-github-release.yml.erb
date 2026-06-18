@@ -3,6 +3,7 @@
   Self-guards in shell on `github_release` (skips when disabled) and `dry_run`
   (preview vs. create), so the composing action needs no `if:` on it. Requires
   the composing action to expose github_release / dry_run / release_tag / notes / sha inputs.
+  Optionally uses release_title for the release name (defaults to the tag).
 -%>
 - name: Create GitHub release
   shell: bash
@@ -11,6 +12,7 @@
     ENABLED: ${{ inputs.github_release }}
     DRY_RUN: ${{ inputs.dry_run }}
     TAG: ${{ inputs.release_tag }}
+    RELEASE_TITLE: ${{ inputs.release_title }}
     NOTES_B64: ${{ inputs.notes }}
     SHA: ${{ inputs.sha }}
   run: |
@@ -18,14 +20,16 @@
       echo "GitHub release disabled; skipping."
       exit 0
     fi
+    # Release name defaults to the tag when no explicit title is provided.
+    TITLE="${RELEASE_TITLE:-$TAG}"
     if [ "$DRY_RUN" = "true" ]; then
-      echo "DRY RUN: would create GitHub release $TAG"
+      echo "DRY RUN: would create GitHub release $TAG (title: $TITLE)"
       echo "--- Release notes preview ---"
       echo "$NOTES_B64" | base64 -d 2>/dev/null || echo "(unavailable)"
     else
       echo "$NOTES_B64" | base64 -d 2>/dev/null > /tmp/release-notes.md
       gh release create "$TAG" \
-        --title "$TAG" \
+        --title "$TITLE" \
         --notes-file /tmp/release-notes.md \
         --target "$SHA"
     fi

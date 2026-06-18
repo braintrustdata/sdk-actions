@@ -40,6 +40,13 @@ inputs:
     description: "npm registry URL"
     required: false
     default: 'https://registry.npmjs.org'
+  package_name:
+    description: >
+      npm package name (matches the publish action's input). When set, validate fails
+      fast if this version is already published (covers prereleases, which aren't
+      git-tagged). Leave empty to skip.
+    required: false
+    default: ''
   tag_format:
     description: "Git tag format, with a {version} placeholder (e.g. js-{version})"
     required: false
@@ -87,6 +94,8 @@ runs:
 <%= render_step('lang/js/setup') %>
 
 <%= render_step('lang/js/read-version') %>
+
+<%= render_step('release/lang/js/npm-availability') %>
 
 <%= render_step('release/lang/js/validate-channel') %>
 

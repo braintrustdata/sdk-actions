@@ -41,6 +41,13 @@ inputs:
     description: "npm registry URL"
     required: false
     default: 'https://registry.npmjs.org'
+  package_name:
+    description: >
+      npm package name (matches the publish action's input). When set, validate fails
+      fast if this version is already published (covers prereleases, which aren't
+      git-tagged). Leave empty to skip.
+    required: false
+    default: ''
   tag_format:
     description: "Git tag format, with a {version} placeholder (e.g. js-{version})"
     required: false
@@ -128,6 +135,23 @@ runs:
           VERSION=$(node -p "require('./package.json').version")
           echo "version=$VERSION" >> $GITHUB_OUTPUT
         fi
+
+    - name: Check npm version availability
+      shell: bash
+      env:
+        PACKAGE_NAME: ${{ inputs.package_name }}
+        VERSION: ${{ steps.read-version.outputs.version }}
+        REGISTRY: ${{ inputs.registry }}
+      run: |
+        if [ -z "$PACKAGE_NAME" ]; then
+          echo "No package_name provided; skipping npm availability check."
+          exit 0
+        fi
+        if npm view "$PACKAGE_NAME@$VERSION" version --registry "$REGISTRY" >/dev/null 2>&1; then
+          echo "Error: $PACKAGE_NAME@$VERSION already exists on npm — has the version been bumped?"
+          exit 1
+        fi
+        echo "$PACKAGE_NAME@$VERSION is available on npm."
 
     - name: Validate release channel
       shell: bash

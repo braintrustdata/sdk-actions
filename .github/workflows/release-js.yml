@@ -133,6 +133,7 @@ jobs:
           dry_run: ${{ inputs.dry_run || github.event_name == 'pull_request' }}
           working_directory: test/release/js
           package_manager: pnpm
+          package_name: '@braintrust/bt-publishing-test' # exercises the npm-availability fail-fast check
           channel: ${{ inputs.channel || 'latest' }}
           allowed_channels: 'latest,rc,next,beta'
 

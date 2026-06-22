@@ -24,7 +24,11 @@ inputs:
   node_version:
     description: "Node version to use"
     required: false
-    default: '22'
+    default: ''
+  node_version_file:
+    description: "Path to a node version file (.tool-versions, .nvmrc, .node-version), relative to the repo root"
+    required: false
+    default: ''
   pnpm_version:
     description: "pnpm version to install (when package_manager is pnpm)"
     required: false

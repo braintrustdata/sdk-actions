@@ -133,6 +133,7 @@ jobs:
           dry_run: ${{ inputs.dry_run || github.event_name == 'pull_request' }}
           working_directory: test/release/js
           package_manager: pnpm
+          node_version_file: test/release/js/.tool-versions # exercises node-version-file sourcing
           package_name: '@braintrust/bt-publishing-test' # exercises the npm-availability fail-fast check
           channel: ${{ inputs.channel || 'latest' }}
           allowed_channels: 'latest,rc,next,beta'
@@ -231,6 +232,7 @@ jobs:
           checkout: 'false' # bt-publishing-test: skip internal checkout — version patching above must survive into the build
           working_directory: test/release/js
           package_manager: pnpm
+          node_version_file: test/release/js/.tool-versions
           dry_run: ${{ inputs.dry_run || github.event_name == 'pull_request' }}
           release_tag: ${{ needs.validate.outputs.release_tag }}
           github_release: 'false' # bt-publishing-test: omit GitHub release to avoid tag/release pollution from repeated test runs

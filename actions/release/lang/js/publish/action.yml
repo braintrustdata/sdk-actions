@@ -49,6 +49,10 @@ inputs:
     description: "Whether to create a GitHub release"
     required: false
     default: 'true'
+  release_title:
+    description: "GitHub release name/title. Defaults to the release tag when empty."
+    required: false
+    default: ''
   npm:
     description: "Whether to publish to the npm registry"
     required: false
@@ -208,6 +212,7 @@ runs:
         ENABLED: ${{ inputs.github_release }}
         DRY_RUN: ${{ inputs.dry_run }}
         TAG: ${{ inputs.release_tag }}
+        RELEASE_TITLE: ${{ inputs.release_title }}
         NOTES_B64: ${{ inputs.notes }}
         SHA: ${{ inputs.sha }}
       run: |
@@ -215,14 +220,16 @@ runs:
           echo "GitHub release disabled; skipping."
           exit 0
         fi
+        # Release name defaults to the tag when no explicit title is provided.
+        TITLE="${RELEASE_TITLE:-$TAG}"
         if [ "$DRY_RUN" = "true" ]; then
-          echo "DRY RUN: would create GitHub release $TAG"
+          echo "DRY RUN: would create GitHub release $TAG (title: $TITLE)"
           echo "--- Release notes preview ---"
           echo "$NOTES_B64" | base64 -d 2>/dev/null || echo "(unavailable)"
         else
           echo "$NOTES_B64" | base64 -d 2>/dev/null > /tmp/release-notes.md
           gh release create "$TAG" \
-            --title "$TAG" \
+            --title "$TITLE" \
             --notes-file /tmp/release-notes.md \
             --target "$SHA"
         fi

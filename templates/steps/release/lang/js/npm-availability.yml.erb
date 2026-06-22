@@ -1,0 +1,25 @@
+<%#
+  Fails fast if the package version is already published to the npm registry.
+  Read-only registry query (no auth). Self-guards: skips when package_name is
+  empty. Complements release/validate's git-tag check by covering prereleases,
+  which aren't tagged. Assumes the read-version step (id: read-version) has run.
+
+  @param package_name [String] expr for the npm package name. Default: ${{ inputs.package_name }}
+  @param registry     [String] expr for the npm registry URL. Default: ${{ inputs.registry }}
+-%>
+- name: Check npm version availability
+  shell: bash
+  env:
+    PACKAGE_NAME: <%= locals.fetch(:package_name) { "${{ inputs.package_name }}" } %>
+    VERSION: ${{ steps.read-version.outputs.version }}
+    REGISTRY: <%= locals.fetch(:registry) { "${{ inputs.registry }}" } %>
+  run: |
+    if [ -z "$PACKAGE_NAME" ]; then
+      echo "No package_name provided; skipping npm availability check."
+      exit 0
+    fi
+    if npm view "$PACKAGE_NAME@$VERSION" version --registry "$REGISTRY" >/dev/null 2>&1; then
+      echo "Error: $PACKAGE_NAME@$VERSION already exists on npm — has the version been bumped?"
+      exit 1
+    fi
+    echo "$PACKAGE_NAME@$VERSION is available on npm."

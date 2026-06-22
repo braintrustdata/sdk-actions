@@ -48,6 +48,10 @@ inputs:
     description: "Whether to create a GitHub release"
     required: false
     default: 'true'
+  release_title:
+    description: "GitHub release name/title. Defaults to the release tag when empty."
+    required: false
+    default: ''
   npm:
     description: "Whether to publish to the npm registry"
     required: false

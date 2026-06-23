@@ -1,7 +1,8 @@
 <%#
   Installs Ruby and the bundle (with caching) for the gem.
 
-  @param ruby_version      [String] expr for the Ruby version.  Default: ${{ inputs.ruby_version }}
+  @param ruby_version      [String] expr for the Ruby version. Also accepts a version file
+    path (.tool-versions / .ruby-version) — ruby/setup-ruby reads it.   Default: ${{ inputs.ruby_version }}
   @param working_directory [String] expr for the gem root.      Default: ${{ inputs.working_directory }}
 -%>
 - name: Set up Ruby

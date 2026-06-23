@@ -4,7 +4,9 @@
   install — genuine control flow that can't be a shell self-guard because the
   pnpm install is a `uses:` action, not a `run:` step.
 
-  @param node_version      [String] expr for the Node version.        Default: ${{ inputs.node_version }}
+  @param node_version      [String] expr for an explicit Node version. Wins when set.  Default: ${{ inputs.node_version }}
+  @param node_version_file [String] expr for a node version FILE (.tool-versions / .nvmrc /
+    .node-version), used when node_version is empty.                   Default: ${{ inputs.node_version_file }}
   @param package_manager   [String] expr for pnpm | npm | yarn.        Default: ${{ inputs.package_manager }}
   @param pnpm_version      [String] expr for the pnpm version (pnpm).  Default: ${{ inputs.pnpm_version }}
   @param registry          [String] expr for the npm registry URL.     Default: ${{ inputs.registry }}
@@ -19,7 +21,10 @@
 - name: Set up Node
   uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
   with:
+    # Explicit node_version wins (setup-node prefers node-version when set); node_version_file
+    # (.tool-versions / .nvmrc / .node-version) is the fallback. Provide one of the two.
     node-version: <%= locals.fetch(:node_version) { "${{ inputs.node_version }}" } %>
+    node-version-file: <%= locals.fetch(:node_version_file) { "${{ inputs.node_version_file }}" } %>
     registry-url: <%= locals.fetch(:registry) { "${{ inputs.registry }}" } %>
     cache: <%= locals.fetch(:package_manager) { "${{ inputs.package_manager }}" } %>
     cache-dependency-path: |

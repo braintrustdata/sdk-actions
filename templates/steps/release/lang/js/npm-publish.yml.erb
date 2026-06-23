@@ -5,9 +5,10 @@
   so the composing action needs no `if:` on it. Assumes Node + the package
   manager are already set up and the package is built.
 
-  npm is pinned to inputs.npm_version (not @latest): tokenless OIDC trusted
-  publishing requires npm >= 11.5.1, which is newer than the npm bundled with
-  setup-node. Provenance requires a public package and `id-token: write`.
+  npm is pinned to a known-good version internally (not @latest, not a consumer
+  input): tokenless OIDC trusted publishing requires npm >= 11.5.1, newer than the
+  npm bundled with setup-node. This is the publish CLI only — unrelated to the app's
+  own npm. Provenance requires a public package and `id-token: write`.
 -%>
 - name: Publish to npm
   shell: bash
@@ -19,7 +20,6 @@
     ACCESS: ${{ inputs.access }}
     PROVENANCE: ${{ inputs.provenance }}
     REGISTRY: ${{ inputs.registry }}
-    NPM_VERSION: ${{ inputs.npm_version }}
     # Force OIDC trusted publishing: clear any inherited token so npm can't fall
     # back to token auth.
     NODE_AUTH_TOKEN: ''
@@ -29,7 +29,9 @@
       echo "npm publishing disabled; skipping."
       exit 0
     fi
-    npm install -g "npm@$NPM_VERSION"
+    # Pinned publish CLI: OIDC trusted publishing needs npm >= 11.5.1, newer than
+    # the npm bundled with setup-node. Bump deliberately, not via @latest.
+    npm install -g "npm@11.6.2"
     ARGS=(--tag "$CHANNEL" --access "$ACCESS" --registry "$REGISTRY")
     [ "$PROVENANCE" = "true" ] && ARGS+=(--provenance)
     if [ "$DRY_RUN" = "true" ]; then

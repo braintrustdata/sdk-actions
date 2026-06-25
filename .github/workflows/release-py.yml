@@ -1,0 +1,37 @@
+# Placeholder so the release-py.yml workflow_dispatch trigger is registered on the
+# default branch. This lets the full workflow be dispatched from its feature branch
+# ("Use workflow from: <branch>") before merge. The functional workflow — which
+# publishes the bt-publishing-test dummy PyPI package end-to-end — replaces this
+# stub when the Python release PR lands.
+name: Release Python (bt-publishing-test)
+
+on:
+  workflow_dispatch:
+    inputs:
+      _instructions:
+        description: "⚠️ Before starting: Merge a version bump PR. Version is read from the SHA."
+        type: string
+        default: "I have merged a version bump PR"
+        required: false
+      sha:
+        description: "Commit SHA (of the version bump) to release"
+        required: true
+        type: string
+      prev_release:
+        description: "Anchor for release notes: a tag name or commit SHA. If SHA, notes will be empty."
+        type: string
+        required: false
+        default: '58a397193105516446c3042361913655bcece509'
+      dry_run:
+        description: "Dry run: Build without tagging or publishing"
+        type: boolean
+        default: false
+
+jobs:
+  placeholder:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Placeholder
+        run: echo "Placeholder — registers workflow_dispatch. The functional release-py.yml lands in the Python release PR."

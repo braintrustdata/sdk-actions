@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bt-publishing-test"
+description = "Braintrust test package. Used only to validate release workflows end-to-end. Not a real package; do not use."
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.9"
+authors = [{ name = "Braintrust", email = "info@braintrust.dev" }]
+dynamic = ["version"]
+
+[project.urls]
+Repository = "https://github.com/braintrustdata/sdk-actions"
+
+# Mirrors the real SDKs: version is sourced from a standalone version.py module,
+# read by the release action's read-version step too.
+[tool.setuptools.dynamic]
+version = { attr = "bt_publishing_test.version.VERSION" }
+
+[tool.setuptools.packages.find]
+where = ["src"]

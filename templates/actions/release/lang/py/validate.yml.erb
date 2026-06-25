@@ -1,0 +1,91 @@
+name: Validate Python Release
+description: >
+  Checks out the release SHA, sets up uv and Python, reads the package
+  version, validates the release metadata (tag existence, branch, commit
+  metadata) and that the version is not already on PyPI, then builds to confirm
+  the package is publishable before the approval gate.
+
+inputs:
+  sha:
+    description: "Commit SHA being released"
+    required: true
+  dry_run:
+    description: "Skip tag existence failure in dry runs"
+    required: false
+    default: 'false'
+  version:
+    description: >
+      Explicit version override. If provided, the version is not read from
+      version_file. Use when the version is computed externally (e.g. bt-publishing-test
+      auto-bump, or an ephemeral prerelease).
+    required: false
+    default: ''
+  version_file:
+    description: >
+      Path (repo-root-relative) to a Python module exposing VERSION (e.g.
+      py/pkg/version.py). Read when version is not overridden.
+    required: false
+    default: ''
+  working_directory:
+    description: "Path to the package root (where pyproject.toml lives)"
+    required: false
+    default: '.'
+  python_version:
+    description: >
+      Python version (e.g. 3.13), or a path to a version file
+      (.python-version, .tool-versions) relative to the repo root.
+    required: true
+  package_name:
+    description: >
+      PyPI package name (matches the publish action's input). When set, validate
+      fails fast if this version is already published (covers prereleases, which
+      aren't git-tagged). Leave empty to skip.
+    required: false
+    default: ''
+  tag_format:
+    description: "Git tag format, with a {version} placeholder (e.g. py-{version})"
+    required: false
+    default: 'py-{version}'
+  build_command:
+    description: "Override build command. When empty, `uv build` is used."
+    required: false
+    default: ''
+outputs:
+  release_tag:
+    description: "The release tag (e.g. py-0.3.2)"
+    value: ${{ steps.validate.outputs.release_tag }}
+  prev_release:
+    description: "The previous release tag"
+    value: ${{ steps.validate.outputs.prev_release }}
+  branch:
+    description: "The branch containing the SHA"
+    value: ${{ steps.validate.outputs.branch }}
+  on_release_branch:
+    description: "Whether the SHA is on an expected release branch"
+    value: ${{ steps.validate.outputs.on_release_branch }}
+  commit_message:
+    description: "The commit message at the SHA"
+    value: ${{ steps.validate.outputs.commit_message }}
+  version:
+    description: "The resolved package version"
+    value: ${{ steps.read-version.outputs.version }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        ref: ${{ inputs.sha }}
+        fetch-depth: 0
+
+<%= render_step('lang/py/setup') %>
+
+<%= render_step('lang/py/read-version') %>
+
+<%= render_step('release/lang/py/pypi-availability') %>
+
+<%= render_step('release/validate', version: "${{ steps.read-version.outputs.version }}", tag_format: "${{ inputs.tag_format }}") %>
+
+<%= render_step('lang/py/build') %>
+
+<%= render_step('lang/py/env-dump', if: "${{ failure() }}") %>

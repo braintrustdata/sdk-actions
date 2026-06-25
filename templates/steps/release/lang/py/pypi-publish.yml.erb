@@ -1,0 +1,41 @@
+<%#
+  Publishes the built sdist + wheel to PyPI with `uv publish` — OIDC Trusted
+  Publishing (no token). When attestations are enabled, PEP 740 attestations are
+  generated with `pypi-attestations` (Sigstore-signed via ambient GitHub OIDC) so
+  `uv publish` uploads them alongside the dists (uv only uploads attestations, it
+  does not generate them). On a dry run, skips both (build + twine check already
+  validated the artifacts). Self-guards on the `pypi` toggle and `dry_run` in
+  shell, so the composing action needs no `if:`.
+
+  Shell-based on purpose: `uv publish` (not the pypa Docker action) so the publish
+  composes cleanly inside this composite action — a Docker container action nested
+  in a composite fails image resolution. Trusted Publishing + attestations need
+  `id-token: write`. Assumes the build step produced <working_directory>/dist.
+-%>
+- name: Publish to PyPI
+  shell: bash
+  working-directory: ${{ inputs.working_directory }}
+  env:
+    PYPI_ENABLED: ${{ inputs.pypi }}
+    DRY_RUN: ${{ inputs.dry_run }}
+    ATTESTATIONS: ${{ inputs.attestations }}
+  run: |
+    if [ "$PYPI_ENABLED" != "true" ]; then
+      echo "PyPI publishing disabled; skipping."
+      exit 0
+    fi
+    if [ "$DRY_RUN" = "true" ]; then
+      echo "DRY RUN: artifacts built and twine-checked; not uploaded to PyPI."
+      exit 0
+    fi
+    # --trusted-publishing always: require OIDC (fail loudly rather than fall back
+    # to token auth).
+    ARGS=(--trusted-publishing always)
+    if [ "$ATTESTATIONS" = "true" ]; then
+      # uv uploads attestations but does not generate them; sign first (Sigstore,
+      # ambient GitHub OIDC) so the *.publish.attestation files exist for upload.
+      uvx pypi-attestations sign dist/*.whl dist/*.tar.gz
+    else
+      ARGS+=(--no-attestations)
+    fi
+    uv publish "${ARGS[@]}"

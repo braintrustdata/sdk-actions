@@ -26,8 +26,14 @@ inputs:
     description: "pnpm version to install. When empty, read from package.json packageManager."
     required: false
     default: ''
+  build:
+    description: >
+      Whether to run the build step. Set to 'false' for packages that publish
+      their sources directly (no build) — the build step then no-ops.
+    required: false
+    default: 'true'
   build_command:
-    description: "npm script to run for the build"
+    description: "npm script to run for the build (when build is 'true')"
     required: false
     default: 'build'
   dry_run:
@@ -130,7 +136,7 @@ runs:
 
 <%= render_step('lang/js/setup') %>
 
-<%= render_step('lang/js/build') %>
+<%= render_step('lang/js/build', if: "${{ inputs.build == 'true' }}") %>
 
 <%= render_step('release/lang/js/npm-publish') %>
 

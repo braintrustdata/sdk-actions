@@ -57,8 +57,14 @@ inputs:
     description: "Comma-separated allowlist of accepted release channels"
     required: false
     default: 'latest'
+  build:
+    description: >
+      Whether to run the build step. Set to 'false' for packages that publish
+      their sources directly (no build) — the build step then no-ops.
+    required: false
+    default: 'true'
   build_command:
-    description: "npm script to run for the build"
+    description: "npm script to run for the build (when build is 'true')"
     required: false
     default: 'build'
 outputs:
@@ -226,6 +232,7 @@ runs:
         echo "Validated $TAG @ $SHA ($COMMIT_MSG)"
 
     - name: Build
+      if: ${{ inputs.build == 'true' }}
       shell: bash
       working-directory: ${{ inputs.working_directory }}
       env:

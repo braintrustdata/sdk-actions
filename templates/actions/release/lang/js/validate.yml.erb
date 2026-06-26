@@ -56,8 +56,14 @@ inputs:
     description: "Comma-separated allowlist of accepted release channels"
     required: false
     default: 'latest'
+  build:
+    description: >
+      Whether to run the build step. Set to 'false' for packages that publish
+      their sources directly (no build) — the build step then no-ops.
+    required: false
+    default: 'true'
   build_command:
-    description: "npm script to run for the build"
+    description: "npm script to run for the build (when build is 'true')"
     required: false
     default: 'build'
 outputs:
@@ -98,6 +104,6 @@ runs:
 
 <%= render_step('release/validate', version: "${{ steps.read-version.outputs.version }}", tag_format: "${{ inputs.tag_format }}") %>
 
-<%= render_step('lang/js/build') %>
+<%= render_step('lang/js/build', if: "${{ inputs.build == 'true' }}") %>
 
 <%= render_step('lang/js/env-dump', if: "${{ failure() }}") %>

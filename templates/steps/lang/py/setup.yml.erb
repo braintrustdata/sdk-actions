@@ -1,0 +1,34 @@
+<%#
+  Installs uv and the Python interpreter for the package. uv owns the whole
+  toolchain (interpreter + build + publish helpers), so no separate setup-python
+  is needed. The resolved version is exported as UV_PYTHON for the rest of the job,
+  so later steps (build, read-version) use the same interpreter.
+
+  @param python_version    [String] expr for the Python version (e.g. 3.13) OR a path to a
+    version file (.python-version / .tool-versions).                   Default: ${{ inputs.python_version }}
+  @param working_directory [String] expr for the package root.         Default: ${{ inputs.working_directory }}
+-%>
+- name: Resolve Python version source
+  id: py-src
+  shell: bash
+  env:
+    PYTHON_VERSION: <%= locals.fetch(:python_version) { "${{ inputs.python_version }}" } %>
+  run: |
+    # python_version is either an explicit version (e.g. 3.13) or a path to a
+    # version file (.python-version / .tool-versions). Route by file existence.
+    if [ -n "$PYTHON_VERSION" ] && [ -f "$PYTHON_VERSION" ]; then
+      case "$PYTHON_VERSION" in
+        *.tool-versions) SPEC=$(awk '/^python /{print $2; exit}' "$PYTHON_VERSION") ;;
+        *)               SPEC=$(head -1 "$PYTHON_VERSION" | tr -d '[:space:]') ;;
+      esac
+    else
+      SPEC="$PYTHON_VERSION"
+    fi
+    echo "spec=$SPEC" >> "$GITHUB_OUTPUT"
+
+- name: Set up uv
+  uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9 # v7.2.0
+  with:
+    # Installs this Python and exports UV_PYTHON for the job, so subsequent uv
+    # commands (build, read-version) use it.
+    python-version: ${{ steps.py-src.outputs.spec }}

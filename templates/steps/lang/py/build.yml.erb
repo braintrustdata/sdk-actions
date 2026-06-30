@@ -1,0 +1,26 @@
+<%#
+  Builds the sdist + wheel into <working_directory>/dist and validates the
+  artifacts' metadata with twine. Composed into both validate (to confirm the
+  package builds before the approval gate) and publish (to produce the artifacts
+  uploaded to PyPI). `uv build` is backend-agnostic — it honours the package's
+  [build-system] (setuptools/hatchling/etc.); twine runs ephemerally via uvx, so
+  neither is a project dependency. Set build_command to override `uv build` for a
+  bespoke build; it MUST still emit the sdist+wheel into <working_directory>/dist.
+
+  @param build_command     [String] expr for an override build command. Default: ${{ inputs.build_command }}
+  @param working_directory [String] expr for the package root.          Default: ${{ inputs.working_directory }}
+-%>
+- name: Build distribution
+  shell: bash
+  working-directory: <%= locals.fetch(:working_directory) { "${{ inputs.working_directory }}" } %>
+  env:
+    BUILD_COMMAND: <%= locals.fetch(:build_command) { "${{ inputs.build_command }}" } %>
+  run: |
+    rm -rf dist
+    if [ -n "$BUILD_COMMAND" ]; then
+      echo "Running custom build: $BUILD_COMMAND"
+      eval "$BUILD_COMMAND"
+    else
+      uv build
+    fi
+    uvx twine check dist/*

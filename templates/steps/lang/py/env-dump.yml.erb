@@ -1,0 +1,20 @@
+<%#
+  Prints environment diagnostics (uv/Python versions, the resolved interpreter,
+  built artifacts, the pyproject header) to help debug a failed release. Run from
+  the package root.
+
+  @param working_directory [String] expr for the package root.  Default: ${{ inputs.working_directory }}
+-%>
+- name: Dump Python environment
+  shell: bash
+  working-directory: <%= locals.fetch(:working_directory) { "${{ inputs.working_directory }}" } %>
+  run: |
+    echo "=== uv / Python ==="
+    uv --version || echo "(uv unavailable)"
+    uv run --no-project python --version || echo "(python unavailable)"
+    echo "=== UV_PYTHON ==="
+    echo "${UV_PYTHON:-(unset)}"
+    echo "=== Built artifacts ==="
+    ls -la dist 2>/dev/null || echo "(no dist/)"
+    echo "=== pyproject.toml ==="
+    head -40 pyproject.toml 2>/dev/null || echo "(no pyproject.toml)"

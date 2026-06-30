@@ -1,0 +1,21 @@
+<%#
+  Builds the PyPI links JSON, then posts the shared release completion
+  notification (release/notify-published) with those links. The version comes in
+  explicitly (inputs.version) rather than being parsed off the tag, since the tag
+  format is configurable (e.g. py-{version}).
+-%>
+- name: Build PyPI links
+  id: links
+  shell: bash
+  env:
+    PACKAGE_NAME: ${{ inputs.package_name }}
+    VERSION: ${{ inputs.version }}
+    DRY_RUN: ${{ inputs.dry_run }}
+  run: |
+    LINKS='[]'
+    if [ "$DRY_RUN" != "true" ] && [ -n "$PACKAGE_NAME" ] && [ -n "$VERSION" ]; then
+      LINKS="[{\"label\":\"PyPI\",\"url\":\"https://pypi.org/project/$PACKAGE_NAME/$VERSION/\"}]"
+    fi
+    echo "links=$LINKS" >> "$GITHUB_OUTPUT"
+
+<%= render_step('release/notify-published', indent: 0, links: "${{ steps.links.outputs.links }}") %>

@@ -11,6 +11,7 @@ Shared GitHub actions and workflows for Braintrust SDK repositories.
 1. **Copy the canonical template** for your language into your repo's
    `.github/workflows/`:
       - [`release-js.yml`](.github/workflows/release-js.yml)
+      - [`release-py.yml`](.github/workflows/release-py.yml)
       - [`release-ruby.yml`](.github/workflows/release-ruby.yml)
 2. **Adapt the marked sections** — version source, gem name, working directory,
    and so on. The template's comments flag exactly what changes per repo;
@@ -35,6 +36,8 @@ pulls in everything it needs.
 | `release/lang/ruby/validate` | Check out the SHA, set up Ruby, read the version, validate the release (tag/branch/metadata), lint + build |
 | `release/lang/js/publish` | Publish the package to npm (OIDC trusted publishing), create the GitHub release, and notify |
 | `release/lang/js/validate` | Check out the SHA, set up Node + package manager, read the version, validate the release (channel/tag/branch/metadata), build |
+| `release/lang/py/publish` | Publish the package to PyPI (OIDC trusted publishing + PEP 740 attestations), create the GitHub release, and notify |
+| `release/lang/py/validate` | Check out the SHA, set up uv + Python, read the version, validate the release (tag/branch/metadata, PyPI availability), build |
 | `release/notify-pending` | Post the pre-approval job summary and Slack notification |
 | `release/prepare` | Fetch the PR list and release notes |
 

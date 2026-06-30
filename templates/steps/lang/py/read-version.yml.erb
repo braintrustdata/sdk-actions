@@ -1,0 +1,24 @@
+<%#
+  Resolves the package version into a `version` output. Uses the explicit
+  override when given, otherwise reads the VERSION attribute from the version file
+  (a .py module holding `VERSION = "..."`). Sets id: read-version. Runs at the repo
+  root, so version_file is repo-root-relative (e.g. py/autoevals/version.py).
+
+  @param version      [String] expr for an explicit version override. Default: ${{ inputs.version }}
+  @param version_file [String] expr for the version file path.        Default: ${{ inputs.version_file }}
+-%>
+- name: Read version
+  id: read-version
+  shell: bash
+  env:
+    VERSION_OVERRIDE: <%= locals.fetch(:version) { "${{ inputs.version }}" } %>
+    VERSION_FILE: <%= locals.fetch(:version_file) { "${{ inputs.version_file }}" } %>
+  run: |
+    if [ -n "$VERSION_OVERRIDE" ]; then
+      echo "version=$VERSION_OVERRIDE" >> "$GITHUB_OUTPUT"
+    else
+      # exec the version file in an isolated namespace (no package import needed),
+      # matching how the SDKs expose VERSION in a standalone version.py.
+      VERSION=$(uv run --no-project python -c "import runpy,sys; print(runpy.run_path(sys.argv[1])['VERSION'])" "$VERSION_FILE")
+      echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+    fi

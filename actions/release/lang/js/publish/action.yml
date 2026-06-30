@@ -421,7 +421,7 @@ runs:
         echo "=== pnpm ==="
         pnpm --version || echo "(unavailable)"
         echo "=== Registry ==="
-        npm config get registry
+        pnpm config get registry
         echo "=== package.json version ==="
         node -p "require('./package.json').version" 2>/dev/null || echo "(unavailable)"
 

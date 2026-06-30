@@ -159,11 +159,24 @@ runs:
           echo "No package_name provided; skipping npm availability check."
           exit 0
         fi
-        if npm view "$PACKAGE_NAME@$VERSION" version --registry "$REGISTRY" >/dev/null 2>&1; then
-          echo "Error: $PACKAGE_NAME@$VERSION already exists on npm — has the version been bumped?"
-          exit 1
-        fi
-        echo "$PACKAGE_NAME@$VERSION is available on npm."
+        REGISTRY="${REGISTRY%/}"
+        CODE=$(curl -sS -o /dev/null -w '%{http_code}' \
+          --retry 3 --retry-connrefused --max-time 30 \
+          "$REGISTRY/$PACKAGE_NAME/$VERSION")
+        case "$CODE" in
+          200)
+            echo "Error: $PACKAGE_NAME@$VERSION already exists on npm — has the version been bumped?"
+            exit 1
+            ;;
+          404)
+            echo "$PACKAGE_NAME@$VERSION is available on npm."
+            ;;
+          *)
+            echo "Error: unexpected response from the npm registry (HTTP $CODE) checking $PACKAGE_NAME@$VERSION;"
+            echo "cannot confirm the version is unpublished — aborting rather than risk a bad release."
+            exit 1
+            ;;
+        esac
 
     - name: Validate release channel
       shell: bash
@@ -251,6 +264,6 @@ runs:
         echo "=== pnpm ==="
         pnpm --version || echo "(unavailable)"
         echo "=== Registry ==="
-        npm config get registry
+        pnpm config get registry
         echo "=== package.json version ==="
         node -p "require('./package.json').version" 2>/dev/null || echo "(unavailable)"

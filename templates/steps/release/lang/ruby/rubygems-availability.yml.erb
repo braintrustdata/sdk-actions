@@ -1,0 +1,36 @@
+<%#
+  Fails fast if the gem version is already published to RubyGems. Read-only
+  registry HTTP query (no auth). The registry — not the git tag — is the source of
+  truth, so this catches a duplicate even if the tag was force-deleted or never
+  pushed, and it covers prereleases (which aren't tagged). Self-guards: skips when
+  package_name is empty. Assumes the read-version step (id: read-version) has run.
+
+  @param package_name [String] expr for the RubyGems gem name. Default: ${{ inputs.package_name }}
+-%>
+- name: Check RubyGems version availability
+  shell: bash
+  env:
+    PACKAGE_NAME: <%= locals.fetch(:package_name) { "${{ inputs.package_name }}" } %>
+    VERSION: ${{ steps.read-version.outputs.version }}
+  run: |
+    if [ -z "$PACKAGE_NAME" ]; then
+      echo "No package_name provided; skipping RubyGems availability check."
+      exit 0
+    fi
+    CODE=$(curl -sS -o /dev/null -w '%{http_code}' \
+      --retry 3 --retry-connrefused --max-time 30 \
+      "https://rubygems.org/api/v2/rubygems/$PACKAGE_NAME/versions/$VERSION.json")
+    case "$CODE" in
+      200)
+        echo "Error: $PACKAGE_NAME $VERSION already exists on RubyGems — has the version been bumped?"
+        exit 1
+        ;;
+      404)
+        echo "$PACKAGE_NAME $VERSION is available on RubyGems."
+        ;;
+      *)
+        echo "Error: unexpected response from RubyGems (HTTP $CODE) checking $PACKAGE_NAME $VERSION;"
+        echo "cannot confirm the version is unpublished — aborting rather than risk a bad release."
+        exit 1
+        ;;
+    esac

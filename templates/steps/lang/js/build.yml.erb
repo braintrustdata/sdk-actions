@@ -1,9 +1,8 @@
 <%#
-  Runs the package's build script with the selected package manager.
-  Composed into both validate (to confirm the package builds before the
-  approval gate) and publish (to produce the artifact npm publishes).
+  Runs the package's build script with pnpm. Composed into both validate (to
+  confirm the package builds before the approval gate) and publish (to produce
+  the artifact npm publishes).
 
-  @param package_manager   [String] expr for pnpm | npm | yarn.   Default: ${{ inputs.package_manager }}
   @param build_command     [String] expr for the npm script name. Default: ${{ inputs.build_command }}
   @param working_directory [String] expr for the package root.    Default: ${{ inputs.working_directory }}
 -%>
@@ -11,7 +10,6 @@
   shell: bash
   working-directory: <%= locals.fetch(:working_directory) { "${{ inputs.working_directory }}" } %>
   env:
-    PM: <%= locals.fetch(:package_manager) { "${{ inputs.package_manager }}" } %>
     BUILD_COMMAND: <%= locals.fetch(:build_command) { "${{ inputs.build_command }}" } %>
   run: |
-    "$PM" run "$BUILD_COMMAND"
+    pnpm run "$BUILD_COMMAND"

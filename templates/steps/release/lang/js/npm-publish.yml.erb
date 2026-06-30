@@ -1,13 +1,11 @@
 <%#
-  Publishes the package to the npm registry with OIDC trusted
-  publishing (no token) and, optionally, provenance/attestation. On a dry run,
-  packs without pushing. Self-guards on the `npm` toggle and `dry_run` in shell,
-  so the composing action needs no `if:` on it. Assumes Node + the package
-  manager are already set up and the package is built.
+  Publishes to the npm registry via `pnpm publish` (the tool — not the `npm` CLI)
+  with OIDC trusted publishing (no token) and optional provenance. Assumes pnpm +
+  Node are already set up (lang/js/setup) and the package is built. Self-guards on
+  the `npm` toggle (publish to the npm registry or not) and `dry_run`.
 
-  npm is pinned to inputs.npm_version (not @latest): tokenless OIDC trusted
-  publishing requires npm >= 11.5.1, which is newer than the npm bundled with
-  setup-node. Provenance requires a public package and `id-token: write`.
+  Uses pnpm, not npm, so pnpm-strict consumers (package.json devEngines/engines,
+  onFail: error) publish unchanged — a direct `npm publish` trips EBADDEVENGINES.
 -%>
 - name: Publish to npm
   shell: bash
@@ -19,22 +17,22 @@
     ACCESS: ${{ inputs.access }}
     PROVENANCE: ${{ inputs.provenance }}
     REGISTRY: ${{ inputs.registry }}
-    NPM_VERSION: ${{ inputs.npm_version }}
-    # Force OIDC trusted publishing: clear any inherited token so npm can't fall
-    # back to token auth.
+    # Force OIDC: clear any inherited token so the publish can't fall back to token auth.
     NODE_AUTH_TOKEN: ''
     NPM_TOKEN: ''
   run: |
     if [ "$NPM_ENABLED" != "true" ]; then
-      echo "npm publishing disabled; skipping."
+      echo "npm registry publishing disabled; skipping."
       exit 0
     fi
-    npm install -g "npm@$NPM_VERSION"
-    ARGS=(--tag "$CHANNEL" --access "$ACCESS" --registry "$REGISTRY")
+    # pnpm delegates the upload to this npm CLI; pin >= 11.5.1 for OIDC (newer than setup-node's).
+    npm install -g "npm@11.6.2"
+    # --no-git-checks: the publish tree may be patched/detached (e.g. an rc version in package.json).
+    ARGS=(--tag "$CHANNEL" --access "$ACCESS" --registry "$REGISTRY" --no-git-checks)
     [ "$PROVENANCE" = "true" ] && ARGS+=(--provenance)
     if [ "$DRY_RUN" = "true" ]; then
-      echo "DRY RUN: npm publish ${ARGS[*]} --dry-run"
-      npm publish "${ARGS[@]}" --dry-run
+      echo "DRY RUN: pnpm publish ${ARGS[*]} --dry-run"
+      pnpm publish "${ARGS[@]}" --dry-run
     else
-      npm publish "${ARGS[@]}"
+      pnpm publish "${ARGS[@]}"
     fi

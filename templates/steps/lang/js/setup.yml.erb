@@ -1,46 +1,48 @@
 <%#
-  Sets up Node and the selected package manager, then installs the
-  dependencies (frozen). The package-manager `if:` selects which runtime to
-  install — genuine control flow that can't be a shell self-guard because the
-  pnpm install is a `uses:` action, not a `run:` step.
+  Sets up Node + pnpm and installs the dependencies (frozen).
 
-  @param node_version      [String] expr for an explicit Node version. Wins when set.  Default: ${{ inputs.node_version }}
-  @param node_version_file [String] expr for a node version FILE (.tool-versions / .nvmrc /
-    .node-version), used when node_version is empty.                   Default: ${{ inputs.node_version_file }}
-  @param package_manager   [String] expr for pnpm | npm | yarn.        Default: ${{ inputs.package_manager }}
-  @param pnpm_version      [String] expr for the pnpm version (pnpm).  Default: ${{ inputs.pnpm_version }}
-  @param registry          [String] expr for the npm registry URL.     Default: ${{ inputs.registry }}
-  @param working_directory [String] expr for the package root.         Default: ${{ inputs.working_directory }}
+  @param node_version      [String] expr for a Node version (e.g. 24) OR a path to a
+    version file (.tool-versions / .nvmrc / .node-version). Required.    Default: ${{ inputs.node_version }}
+  @param pnpm_version      [String] expr for the pnpm version. When empty, pnpm is read
+    from the package.json "packageManager" field in working_directory.   Default: ${{ inputs.pnpm_version }}
+  @param registry          [String] expr for the npm registry URL.       Default: ${{ inputs.registry }}
+  @param working_directory [String] expr for the package root.           Default: ${{ inputs.working_directory }}
 -%>
 - name: Set up pnpm
-  if: ${{ <%= locals.fetch(:package_manager) { "inputs.package_manager" } %> == 'pnpm' }}
   uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
   with:
+    # Empty version → action-setup reads the pnpm version from this package.json's
+    # "packageManager" field (one source of truth). A non-empty value overrides it.
     version: <%= locals.fetch(:pnpm_version) { "${{ inputs.pnpm_version }}" } %>
+    package_json_file: <%= locals.fetch(:working_directory) { "${{ inputs.working_directory }}" } %>/package.json
+
+- name: Resolve Node version source
+  id: node-src
+  shell: bash
+  env:
+    NODE_VERSION: <%= locals.fetch(:node_version) { "${{ inputs.node_version }}" } %>
+  run: |
+    # node_version is either an explicit version (e.g. 24) or a path to a version
+    # file (.tool-versions / .nvmrc / .node-version). Route by file existence so a
+    # single input covers both; paths are relative to the repo root (as setup-node expects).
+    if [ -n "$NODE_VERSION" ] && [ -f "$NODE_VERSION" ]; then
+      echo "file=$NODE_VERSION" >> "$GITHUB_OUTPUT"
+      echo "spec=" >> "$GITHUB_OUTPUT"
+    else
+      echo "file=" >> "$GITHUB_OUTPUT"
+      echo "spec=$NODE_VERSION" >> "$GITHUB_OUTPUT"
+    fi
 
 - name: Set up Node
   uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
   with:
-    # Explicit node_version wins (setup-node prefers node-version when set); node_version_file
-    # (.tool-versions / .nvmrc / .node-version) is the fallback. Provide one of the two.
-    node-version: <%= locals.fetch(:node_version) { "${{ inputs.node_version }}" } %>
-    node-version-file: <%= locals.fetch(:node_version_file) { "${{ inputs.node_version_file }}" } %>
+    node-version: ${{ steps.node-src.outputs.spec }}
+    node-version-file: ${{ steps.node-src.outputs.file }}
     registry-url: <%= locals.fetch(:registry) { "${{ inputs.registry }}" } %>
-    cache: <%= locals.fetch(:package_manager) { "${{ inputs.package_manager }}" } %>
-    cache-dependency-path: |
-      <%= locals.fetch(:working_directory) { "${{ inputs.working_directory }}" } %>/pnpm-lock.yaml
-      <%= locals.fetch(:working_directory) { "${{ inputs.working_directory }}" } %>/package-lock.json
-      <%= locals.fetch(:working_directory) { "${{ inputs.working_directory }}" } %>/yarn.lock
+    cache: pnpm
+    cache-dependency-path: <%= locals.fetch(:working_directory) { "${{ inputs.working_directory }}" } %>/pnpm-lock.yaml
 
 - name: Install dependencies
   shell: bash
   working-directory: <%= locals.fetch(:working_directory) { "${{ inputs.working_directory }}" } %>
-  env:
-    PM: <%= locals.fetch(:package_manager) { "${{ inputs.package_manager }}" } %>
-  run: |
-    case "$PM" in
-      pnpm) pnpm install --frozen-lockfile ;;
-      yarn) yarn install --frozen-lockfile ;;
-      npm)  npm ci ;;
-      *) echo "Unknown package_manager: $PM"; exit 1 ;;
-    esac
+  run: pnpm install --frozen-lockfile

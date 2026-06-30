@@ -1,6 +1,6 @@
 name: Validate JavaScript Release
 description: >
-  Checks out the release SHA, sets up Node and the package manager, reads the
+  Checks out the release SHA, sets up Node and pnpm, reads the
   package version, validates the release channel and metadata (tag existence,
   branch, commit metadata), and builds to confirm the package is publishable
   before the approval gate.
@@ -24,22 +24,15 @@ inputs:
     description: "Path to the package root (where package.json lives)"
     required: false
     default: '.'
-  package_manager:
-    description: "Package manager: pnpm | npm | yarn"
-    required: false
-    default: 'pnpm'
   node_version:
-    description: "Node version to use"
-    required: false
-    default: ''
-  node_version_file:
-    description: "Path to a node version file (.tool-versions, .nvmrc, .node-version), relative to the repo root"
-    required: false
-    default: ''
+    description: >
+      Node version (e.g. 24), or a path to a version file
+      (.tool-versions, .nvmrc, .node-version) relative to the repo root.
+    required: true
   pnpm_version:
-    description: "pnpm version to install (when package_manager is pnpm)"
+    description: "pnpm version to install. When empty, read from package.json packageManager."
     required: false
-    default: '10.33.0'
+    default: ''
   registry:
     description: "npm registry URL"
     required: false
@@ -63,8 +56,14 @@ inputs:
     description: "Comma-separated allowlist of accepted release channels"
     required: false
     default: 'latest'
+  build:
+    description: >
+      Whether to run the build step. Set to 'false' for packages that publish
+      their sources directly (no build) — the build step then no-ops.
+    required: false
+    default: 'true'
   build_command:
-    description: "npm script to run for the build"
+    description: "npm script to run for the build (when build is 'true')"
     required: false
     default: 'build'
 outputs:
@@ -105,6 +104,6 @@ runs:
 
 <%= render_step('release/validate', version: "${{ steps.read-version.outputs.version }}", tag_format: "${{ inputs.tag_format }}") %>
 
-<%= render_step('lang/js/build') %>
+<%= render_step('lang/js/build', if: "${{ inputs.build == 'true' }}") %>
 
 <%= render_step('lang/js/env-dump', if: "${{ failure() }}") %>

@@ -1,8 +1,8 @@
 name: Validate Ruby Release
 description: >
   Checks out the release SHA, sets up Ruby, reads the gem version, validates
-  the release (tag existence, branch, commit metadata), and runs lint + build
-  to confirm the gem is publishable before the approval gate.
+  the release (RubyGems availability, tag existence, branch, commit metadata),
+  and runs lint + build to confirm the gem is publishable before the approval gate.
 
 inputs:
   sha:
@@ -31,6 +31,13 @@ inputs:
     description: "Path to the gem root (where Gemfile and gemspec live)"
     required: false
     default: '.'
+  package_name:
+    description: >
+      RubyGems gem name. When set, validate fails fast if this version is already
+      published — the registry, not the git tag, is the source of truth (covers
+      prereleases and force-deleted tags). Leave empty to skip.
+    required: false
+    default: ''
   ruby_version:
     description: "Ruby version to use, or a version file path (.tool-versions, .ruby-version)"
     required: false
@@ -63,6 +70,8 @@ runs:
 <%= render_step('lang/ruby/setup') %>
 
 <%= render_step('lang/ruby/read-version') %>
+
+<%= render_step('release/lang/ruby/rubygems-availability') %>
 
 <%= render_step('release/validate', version: "${{ steps.read-version.outputs.version }}") %>
 

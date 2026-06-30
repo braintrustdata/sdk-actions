@@ -2,8 +2,8 @@
 name: Validate Ruby Release
 description: >
   Checks out the release SHA, sets up Ruby, reads the gem version, validates
-  the release (tag existence, branch, commit metadata), and runs lint + build
-  to confirm the gem is publishable before the approval gate.
+  the release (RubyGems availability, tag existence, branch, commit metadata),
+  and runs lint + build to confirm the gem is publishable before the approval gate.
 
 inputs:
   sha:
@@ -32,6 +32,13 @@ inputs:
     description: "Path to the gem root (where Gemfile and gemspec live)"
     required: false
     default: '.'
+  package_name:
+    description: >
+      RubyGems gem name. When set, validate fails fast if this version is already
+      published — the registry, not the git tag, is the source of truth (covers
+      prereleases and force-deleted tags). Leave empty to skip.
+    required: false
+    default: ''
   ruby_version:
     description: "Ruby version to use, or a version file path (.tool-versions, .ruby-version)"
     required: false
@@ -82,6 +89,34 @@ runs:
           VERSION=$(ruby -r "./$VERSION_FILE" -e "puts Object.const_get(ENV.fetch('VERSION_MODULE')).const_get(:VERSION)")
           echo "version=$VERSION" >> $GITHUB_OUTPUT
         fi
+
+    - name: Check RubyGems version availability
+      shell: bash
+      env:
+        PACKAGE_NAME: ${{ inputs.package_name }}
+        VERSION: ${{ steps.read-version.outputs.version }}
+      run: |
+        if [ -z "$PACKAGE_NAME" ]; then
+          echo "No package_name provided; skipping RubyGems availability check."
+          exit 0
+        fi
+        CODE=$(curl -sS -o /dev/null -w '%{http_code}' \
+          --retry 3 --retry-connrefused --max-time 30 \
+          "https://rubygems.org/api/v2/rubygems/$PACKAGE_NAME/versions/$VERSION.json")
+        case "$CODE" in
+          200)
+            echo "Error: $PACKAGE_NAME $VERSION already exists on RubyGems — has the version been bumped?"
+            exit 1
+            ;;
+          404)
+            echo "$PACKAGE_NAME $VERSION is available on RubyGems."
+            ;;
+          *)
+            echo "Error: unexpected response from RubyGems (HTTP $CODE) checking $PACKAGE_NAME $VERSION;"
+            echo "cannot confirm the version is unpublished — aborting rather than risk a bad release."
+            exit 1
+            ;;
+        esac
 
     - name: Validate SHA format
       shell: bash

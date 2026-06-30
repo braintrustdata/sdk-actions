@@ -193,25 +193,24 @@ runs:
         ACCESS: ${{ inputs.access }}
         PROVENANCE: ${{ inputs.provenance }}
         REGISTRY: ${{ inputs.registry }}
-        # Force OIDC trusted publishing: clear any inherited token so npm can't fall
-        # back to token auth.
+        # Force OIDC: clear any inherited token so the publish can't fall back to token auth.
         NODE_AUTH_TOKEN: ''
         NPM_TOKEN: ''
       run: |
         if [ "$NPM_ENABLED" != "true" ]; then
-          echo "npm publishing disabled; skipping."
+          echo "npm registry publishing disabled; skipping."
           exit 0
         fi
-        # Pinned publish CLI: OIDC trusted publishing needs npm >= 11.5.1, newer than
-        # the npm bundled with setup-node. Bump deliberately, not via @latest.
+        # pnpm delegates the upload to this npm CLI; pin >= 11.5.1 for OIDC (newer than setup-node's).
         npm install -g "npm@11.6.2"
-        ARGS=(--tag "$CHANNEL" --access "$ACCESS" --registry "$REGISTRY")
+        # --no-git-checks: the publish tree may be patched/detached (e.g. an rc version in package.json).
+        ARGS=(--tag "$CHANNEL" --access "$ACCESS" --registry "$REGISTRY" --no-git-checks)
         [ "$PROVENANCE" = "true" ] && ARGS+=(--provenance)
         if [ "$DRY_RUN" = "true" ]; then
-          echo "DRY RUN: npm publish ${ARGS[*]} --dry-run"
-          npm publish "${ARGS[@]}" --dry-run
+          echo "DRY RUN: pnpm publish ${ARGS[*]} --dry-run"
+          pnpm publish "${ARGS[@]}" --dry-run
         else
-          npm publish "${ARGS[@]}"
+          pnpm publish "${ARGS[@]}"
         fi
 
     - name: Create GitHub release

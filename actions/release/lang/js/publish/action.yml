@@ -420,10 +420,24 @@ runs:
         npm --version
         echo "=== pnpm ==="
         pnpm --version || echo "(unavailable)"
-        echo "=== Registry ==="
-        pnpm config get registry
-        echo "=== package.json version ==="
-        node -p "require('./package.json').version" 2>/dev/null || echo "(unavailable)"
+        echo "=== package.json ==="
+        node -e '
+          const p = require("./package.json");
+          console.log(JSON.stringify({
+            name: p.name,
+            version: p.version,
+            private: p.private || false,
+            packageManager: p.packageManager,
+            engines: p.engines,
+            devEngines: p.devEngines,
+            publishConfig: p.publishConfig,
+            lifecycle: Object.fromEntries(
+              ["prepublishOnly", "prepack", "prepare", "postpack"]
+                .filter((k) => p.scripts && p.scripts[k])
+                .map((k) => [k, p.scripts[k]]),
+            ),
+          }, null, 2));
+        ' 2>/dev/null || echo "(package.json unavailable)"
 
     - name: Build failure message
       if: ${{ failure() }}

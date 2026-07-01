@@ -1,9 +1,9 @@
 <%#
-  Prints environment diagnostics (Node/npm/pnpm versions, the configured
-  registry, the package.json version) to help debug a failed release. Run from
-  the package root.
+  Prints environment diagnostics: Node/npm/pnpm versions and key package.json
+  fields (package manager, engines/devEngines, publishConfig, lifecycle scripts).
+  Scrapes the environment — takes no inputs. Run from the package root.
 
-  @param working_directory [String] expr for the package root.  Default: ${{ inputs.working_directory }}
+  @param working_directory [String] expr for the package root. Default: ${{ inputs.working_directory }}
 -%>
 - name: Dump JavaScript environment
   shell: bash
@@ -14,7 +14,21 @@
     npm --version
     echo "=== pnpm ==="
     pnpm --version || echo "(unavailable)"
-    echo "=== Registry ==="
-    pnpm config get registry
-    echo "=== package.json version ==="
-    node -p "require('./package.json').version" 2>/dev/null || echo "(unavailable)"
+    echo "=== package.json ==="
+    node -e '
+      const p = require("./package.json");
+      console.log(JSON.stringify({
+        name: p.name,
+        version: p.version,
+        private: p.private || false,
+        packageManager: p.packageManager,
+        engines: p.engines,
+        devEngines: p.devEngines,
+        publishConfig: p.publishConfig,
+        lifecycle: Object.fromEntries(
+          ["prepublishOnly", "prepack", "prepare", "postpack"]
+            .filter((k) => p.scripts && p.scripts[k])
+            .map((k) => [k, p.scripts[k]]),
+        ),
+      }, null, 2));
+    ' 2>/dev/null || echo "(package.json unavailable)"

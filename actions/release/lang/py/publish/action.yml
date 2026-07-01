@@ -179,7 +179,10 @@ runs:
         else
           ARGS+=(--no-attestations)
         fi
-        uv publish "${ARGS[@]}"
+        uv publish "${ARGS[@]}" || {
+          echo "::error title=PyPI publish failed::auth/OIDC error → the PyPI trusted publisher must list this repo, workflow, and (if gated) environment; a 400 'File already exists' → the version is already on PyPI (bump it)."
+          exit 1
+        }
 
     - name: Create GitHub release
       shell: bash
@@ -372,7 +375,7 @@ runs:
         if echo "$RESPONSE" | jq -e '.ok' > /dev/null 2>&1; then
           echo "Slack notification sent."
         elif [ "$FAIL_ON_ERROR" = "true" ]; then
-          echo "Slack notification failed: $RESPONSE"
+          echo "::error title=Slack notification failed::$RESPONSE"
           exit 1
         else
           echo "::warning::Slack notification failed: $RESPONSE"
@@ -459,7 +462,7 @@ runs:
         if echo "$RESPONSE" | jq -e '.ok' > /dev/null 2>&1; then
           echo "Slack notification sent."
         elif [ "$FAIL_ON_ERROR" = "true" ]; then
-          echo "Slack notification failed: $RESPONSE"
+          echo "::error title=Slack notification failed::$RESPONSE"
           exit 1
         else
           echo "::warning::Slack notification failed: $RESPONSE"

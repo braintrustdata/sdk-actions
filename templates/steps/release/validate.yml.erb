@@ -18,7 +18,7 @@
     SHA: <%= locals.fetch(:sha) { "${{ inputs.sha }}" } %>
   run: |
     if ! echo "$SHA" | grep -qE '^[0-9a-f]{40}$'; then
-      echo "Error: sha must be a full 40-character commit SHA — branch names and short SHAs are not accepted."
+      echo "::error title=Invalid release SHA::sha must be a full 40-character commit SHA — branch names and short SHAs are not accepted."
       exit 1
     fi
 
@@ -38,9 +38,9 @@
 
     if git rev-parse "$TAG" >/dev/null 2>&1; then
       if [ "$DRY_RUN" = "true" ]; then
-        echo "Warning: Tag $TAG already exists — skipping in dry run"
+        echo "::warning title=Release tag already exists::Tag $TAG already exists — skipping in dry run."
       else
-        echo "Error: Tag $TAG already exists — has the version been bumped?"
+        echo "::error title=Release tag already exists::Tag $TAG already exists — has the version been bumped?"
         exit 1
       fi
     fi

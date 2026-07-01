@@ -32,7 +32,9 @@
     [ "$PROVENANCE" = "true" ] && ARGS+=(--provenance)
     if [ "$DRY_RUN" = "true" ]; then
       echo "DRY RUN: pnpm publish ${ARGS[*]} --dry-run"
-      pnpm publish "${ARGS[@]}" --dry-run
-    else
-      pnpm publish "${ARGS[@]}"
+      ARGS+=(--dry-run)
     fi
+    pnpm publish "${ARGS[@]}" || {
+      echo "::error title=npm publish failed::auth/ENEEDAUTH → the npm trusted publisher must list this repo, workflow, and (if gated) environment; 'cannot publish over <version>' → the version already exists on npm (bump it)."
+      exit 1
+    }

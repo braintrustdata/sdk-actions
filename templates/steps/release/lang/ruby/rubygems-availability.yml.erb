@@ -22,15 +22,14 @@
       "https://rubygems.org/api/v2/rubygems/$PACKAGE_NAME/versions/$VERSION.json")
     case "$CODE" in
       200)
-        echo "Error: $PACKAGE_NAME $VERSION already exists on RubyGems — has the version been bumped?"
+        echo "::error title=Version already published::$PACKAGE_NAME $VERSION already exists on RubyGems — has the version been bumped?"
         exit 1
         ;;
       404)
         echo "$PACKAGE_NAME $VERSION is available on RubyGems."
         ;;
       *)
-        echo "Error: unexpected response from RubyGems (HTTP $CODE) checking $PACKAGE_NAME $VERSION;"
-        echo "cannot confirm the version is unpublished — aborting rather than risk a bad release."
+        echo "::error title=Registry check failed::unexpected response from RubyGems (HTTP $CODE) checking $PACKAGE_NAME $VERSION — cannot confirm the version is unpublished; aborting rather than risk a bad release."
         exit 1
         ;;
     esac

@@ -17,5 +17,5 @@
     for c in "${OK[@]}"; do
       [ "$(echo "$c" | xargs)" = "$CHANNEL" ] && exit 0
     done
-    echo "Error: release channel '$CHANNEL' is not in the allowed set: $ALLOWED"
+    echo "::error title=Release channel not allowed::release channel '$CHANNEL' is not in the allowed set: $ALLOWED"
     exit 1

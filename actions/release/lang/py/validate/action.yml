@@ -228,5 +228,17 @@ runs:
         echo "${UV_PYTHON:-(unset)}"
         echo "=== Built artifacts ==="
         ls -la dist 2>/dev/null || echo "(no dist/)"
-        echo "=== pyproject.toml ==="
-        head -40 pyproject.toml 2>/dev/null || echo "(no pyproject.toml)"
+        echo "=== pyproject.toml (release-relevant) ==="
+        uv run --no-project python -c '
+        import json, tomllib, pathlib
+        t = tomllib.loads(pathlib.Path("pyproject.toml").read_text())
+        proj = t.get("project", {})
+        print(json.dumps({
+            "name": proj.get("name"),
+            "version": proj.get("version") or ("(dynamic)" if "version" in proj.get("dynamic", []) else None),
+            "requires-python": proj.get("requires-python"),
+            "dependencies": proj.get("dependencies"),
+            "optional-dependencies": sorted((proj.get("optional-dependencies") or {}).keys()),
+            "build-system": t.get("build-system"),
+        }, indent=2))
+        ' 2>/dev/null || echo "(pyproject.toml unavailable)"

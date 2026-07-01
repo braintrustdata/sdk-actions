@@ -112,13 +112,17 @@ runs:
         VERSION_FILE: ${{ inputs.version_file }}
       run: |
         if [ -n "$VERSION_OVERRIDE" ]; then
-          echo "version=$VERSION_OVERRIDE" >> "$GITHUB_OUTPUT"
+          VERSION="$VERSION_OVERRIDE"
         else
           # exec the version file in an isolated namespace (no package import needed),
           # matching how the SDKs expose VERSION in a standalone version.py.
           VERSION=$(uv run --no-project python -c "import runpy,sys; print(runpy.run_path(sys.argv[1])['VERSION'])" "$VERSION_FILE")
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
         fi
+        if [ -z "$VERSION" ] || [ "$VERSION" = "None" ]; then
+          echo "::error title=Could not read version::resolved an empty version — check VERSION in $VERSION_FILE (or pass a version override)."
+          exit 1
+        fi
+        echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
     - name: Check PyPI version availability
       shell: bash
@@ -135,15 +139,14 @@ runs:
           "https://pypi.org/pypi/$PACKAGE_NAME/$VERSION/json")
         case "$CODE" in
           200)
-            echo "Error: $PACKAGE_NAME $VERSION already exists on PyPI — has the version been bumped?"
+            echo "::error title=Version already published::$PACKAGE_NAME $VERSION already exists on PyPI — has the version been bumped?"
             exit 1
             ;;
           404)
             echo "$PACKAGE_NAME $VERSION is available on PyPI."
             ;;
           *)
-            echo "Error: unexpected response from PyPI (HTTP $CODE) checking $PACKAGE_NAME $VERSION;"
-            echo "cannot confirm the version is unpublished — aborting rather than risk a bad release."
+            echo "::error title=Registry check failed::unexpected response from PyPI (HTTP $CODE) checking $PACKAGE_NAME $VERSION — cannot confirm the version is unpublished; aborting rather than risk a bad release."
             exit 1
             ;;
         esac
@@ -154,7 +157,7 @@ runs:
         SHA: ${{ inputs.sha }}
       run: |
         if ! echo "$SHA" | grep -qE '^[0-9a-f]{40}$'; then
-          echo "Error: sha must be a full 40-character commit SHA — branch names and short SHAs are not accepted."
+          echo "::error title=Invalid release SHA::sha must be a full 40-character commit SHA — branch names and short SHAs are not accepted."
           exit 1
         fi
 
@@ -174,9 +177,9 @@ runs:
 
         if git rev-parse "$TAG" >/dev/null 2>&1; then
           if [ "$DRY_RUN" = "true" ]; then
-            echo "Warning: Tag $TAG already exists — skipping in dry run"
+            echo "::warning title=Release tag already exists::Tag $TAG already exists — skipping in dry run."
           else
-            echo "Error: Tag $TAG already exists — has the version been bumped?"
+            echo "::error title=Release tag already exists::Tag $TAG already exists — has the version been bumped?"
             exit 1
           fi
         fi
@@ -228,5 +231,17 @@ runs:
         echo "${UV_PYTHON:-(unset)}"
         echo "=== Built artifacts ==="
         ls -la dist 2>/dev/null || echo "(no dist/)"
-        echo "=== pyproject.toml ==="
-        head -40 pyproject.toml 2>/dev/null || echo "(no pyproject.toml)"
+        echo "=== pyproject.toml (release-relevant) ==="
+        uv run --no-project python -c '
+        import json, tomllib, pathlib
+        t = tomllib.loads(pathlib.Path("pyproject.toml").read_text())
+        proj = t.get("project", {})
+        print(json.dumps({
+            "name": proj.get("name"),
+            "version": proj.get("version") or ("(dynamic)" if "version" in proj.get("dynamic", []) else None),
+            "requires-python": proj.get("requires-python"),
+            "dependencies": proj.get("dependencies"),
+            "optional-dependencies": sorted((proj.get("optional-dependencies") or {}).keys()),
+            "build-system": t.get("build-system"),
+        }, indent=2))
+        ' 2>/dev/null || echo "(pyproject.toml unavailable)"

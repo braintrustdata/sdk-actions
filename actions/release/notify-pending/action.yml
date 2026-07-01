@@ -202,7 +202,7 @@ runs:
         if echo "$RESPONSE" | jq -e '.ok' > /dev/null 2>&1; then
           echo "Slack notification sent."
         elif [ "$FAIL_ON_ERROR" = "true" ]; then
-          echo "Slack notification failed: $RESPONSE"
+          echo "::error title=Slack notification failed::$RESPONSE"
           exit 1
         else
           echo "::warning::Slack notification failed: $RESPONSE"

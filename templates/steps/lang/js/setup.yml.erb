@@ -45,4 +45,8 @@
 - name: Install dependencies
   shell: bash
   working-directory: <%= locals.fetch(:working_directory) { "${{ inputs.working_directory }}" } %>
-  run: pnpm install --frozen-lockfile
+  run: |
+    pnpm install --frozen-lockfile || {
+      echo "::error title=Dependency install failed::'pnpm install --frozen-lockfile' failed — the lockfile is likely out of sync with package.json (run 'pnpm install' and commit pnpm-lock.yaml)."
+      exit 1
+    }

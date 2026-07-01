@@ -172,7 +172,11 @@ runs:
     - name: Install dependencies
       shell: bash
       working-directory: ${{ inputs.working_directory }}
-      run: pnpm install --frozen-lockfile
+      run: |
+        pnpm install --frozen-lockfile || {
+          echo "::error title=Dependency install failed::'pnpm install --frozen-lockfile' failed — the lockfile is likely out of sync with package.json (run 'pnpm install' and commit pnpm-lock.yaml)."
+          exit 1
+        }
 
     - name: Build
       if: ${{ inputs.build == 'true' }}
@@ -208,10 +212,12 @@ runs:
         [ "$PROVENANCE" = "true" ] && ARGS+=(--provenance)
         if [ "$DRY_RUN" = "true" ]; then
           echo "DRY RUN: pnpm publish ${ARGS[*]} --dry-run"
-          pnpm publish "${ARGS[@]}" --dry-run
-        else
-          pnpm publish "${ARGS[@]}"
+          ARGS+=(--dry-run)
         fi
+        pnpm publish "${ARGS[@]}" || {
+          echo "::error title=npm publish failed::auth/ENEEDAUTH → the npm trusted publisher must list this repo, workflow, and (if gated) environment; 'cannot publish over <version>' → the version already exists on npm (bump it)."
+          exit 1
+        }
 
     - name: Create GitHub release
       shell: bash
@@ -404,7 +410,7 @@ runs:
         if echo "$RESPONSE" | jq -e '.ok' > /dev/null 2>&1; then
           echo "Slack notification sent."
         elif [ "$FAIL_ON_ERROR" = "true" ]; then
-          echo "Slack notification failed: $RESPONSE"
+          echo "::error title=Slack notification failed::$RESPONSE"
           exit 1
         else
           echo "::warning::Slack notification failed: $RESPONSE"
@@ -420,10 +426,24 @@ runs:
         npm --version
         echo "=== pnpm ==="
         pnpm --version || echo "(unavailable)"
-        echo "=== Registry ==="
-        pnpm config get registry
-        echo "=== package.json version ==="
-        node -p "require('./package.json').version" 2>/dev/null || echo "(unavailable)"
+        echo "=== package.json ==="
+        node -e '
+          const p = require("./package.json");
+          console.log(JSON.stringify({
+            name: p.name,
+            version: p.version,
+            private: p.private || false,
+            packageManager: p.packageManager,
+            engines: p.engines,
+            devEngines: p.devEngines,
+            publishConfig: p.publishConfig,
+            lifecycle: Object.fromEntries(
+              ["prepublishOnly", "prepack", "prepare", "postpack"]
+                .filter((k) => p.scripts && p.scripts[k])
+                .map((k) => [k, p.scripts[k]]),
+            ),
+          }, null, 2));
+        ' 2>/dev/null || echo "(package.json unavailable)"
 
     - name: Build failure message
       if: ${{ failure() }}
@@ -479,7 +499,7 @@ runs:
         if echo "$RESPONSE" | jq -e '.ok' > /dev/null 2>&1; then
           echo "Slack notification sent."
         elif [ "$FAIL_ON_ERROR" = "true" ]; then
-          echo "Slack notification failed: $RESPONSE"
+          echo "::error title=Slack notification failed::$RESPONSE"
           exit 1
         else
           echo "::warning::Slack notification failed: $RESPONSE"

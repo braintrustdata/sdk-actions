@@ -38,4 +38,7 @@
     else
       ARGS+=(--no-attestations)
     fi
-    uv publish "${ARGS[@]}"
+    uv publish "${ARGS[@]}" || {
+      echo "::error title=PyPI publish failed::auth/OIDC error → the PyPI trusted publisher must list this repo, workflow, and (if gated) environment; a 400 'File already exists' → the version is already on PyPI (bump it)."
+      exit 1
+    }

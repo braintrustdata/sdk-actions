@@ -16,8 +16,12 @@
     VERSION_MODULE: <%= locals.fetch(:version_module) { "${{ inputs.version_module }}" } %>
   run: |
     if [ -n "$VERSION_OVERRIDE" ]; then
-      echo "version=$VERSION_OVERRIDE" >> $GITHUB_OUTPUT
+      VERSION="$VERSION_OVERRIDE"
     else
       VERSION=$(ruby -r "./$VERSION_FILE" -e "puts Object.const_get(ENV.fetch('VERSION_MODULE')).const_get(:VERSION)")
-      echo "version=$VERSION" >> $GITHUB_OUTPUT
     fi
+    if [ -z "$VERSION" ]; then
+      echo "::error title=Could not read version::resolved an empty version — check VERSION in $VERSION_FILE (module $VERSION_MODULE), or pass a version override."
+      exit 1
+    fi
+    echo "version=$VERSION" >> $GITHUB_OUTPUT

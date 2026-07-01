@@ -179,7 +179,10 @@ runs:
         else
           ARGS+=(--no-attestations)
         fi
-        uv publish "${ARGS[@]}"
+        uv publish "${ARGS[@]}" || {
+          echo "::error title=PyPI publish failed::auth/OIDC error → the PyPI trusted publisher must list this repo, workflow, and (if gated) environment; a 400 'File already exists' → the version is already on PyPI (bump it)."
+          exit 1
+        }
 
     - name: Create GitHub release
       shell: bash
@@ -372,7 +375,7 @@ runs:
         if echo "$RESPONSE" | jq -e '.ok' > /dev/null 2>&1; then
           echo "Slack notification sent."
         elif [ "$FAIL_ON_ERROR" = "true" ]; then
-          echo "Slack notification failed: $RESPONSE"
+          echo "::error title=Slack notification failed::$RESPONSE"
           exit 1
         else
           echo "::warning::Slack notification failed: $RESPONSE"
@@ -390,8 +393,20 @@ runs:
         echo "${UV_PYTHON:-(unset)}"
         echo "=== Built artifacts ==="
         ls -la dist 2>/dev/null || echo "(no dist/)"
-        echo "=== pyproject.toml ==="
-        head -40 pyproject.toml 2>/dev/null || echo "(no pyproject.toml)"
+        echo "=== pyproject.toml (release-relevant) ==="
+        uv run --no-project python -c '
+        import json, tomllib, pathlib
+        t = tomllib.loads(pathlib.Path("pyproject.toml").read_text())
+        proj = t.get("project", {})
+        print(json.dumps({
+            "name": proj.get("name"),
+            "version": proj.get("version") or ("(dynamic)" if "version" in proj.get("dynamic", []) else None),
+            "requires-python": proj.get("requires-python"),
+            "dependencies": proj.get("dependencies"),
+            "optional-dependencies": sorted((proj.get("optional-dependencies") or {}).keys()),
+            "build-system": t.get("build-system"),
+        }, indent=2))
+        ' 2>/dev/null || echo "(pyproject.toml unavailable)"
 
     - name: Build failure message
       if: ${{ failure() }}
@@ -447,7 +462,7 @@ runs:
         if echo "$RESPONSE" | jq -e '.ok' > /dev/null 2>&1; then
           echo "Slack notification sent."
         elif [ "$FAIL_ON_ERROR" = "true" ]; then
-          echo "Slack notification failed: $RESPONSE"
+          echo "::error title=Slack notification failed::$RESPONSE"
           exit 1
         else
           echo "::warning::Slack notification failed: $RESPONSE"

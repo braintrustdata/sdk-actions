@@ -7,7 +7,7 @@
     "type": "git",
     "url": "git+https://github.com/braintrustdata/sdk-actions.git"
   },
-  "packageManager": "pnpm@10.33.0",
+  "packageManager": "pnpm@11.9.0",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [

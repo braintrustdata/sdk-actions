@@ -4,6 +4,8 @@
   (preview vs. create), so the composing action needs no `if:` on it. Requires
   the composing action to expose github_release / dry_run / release_tag / notes / sha inputs.
   Optionally uses release_title for the release name (defaults to the tag).
+  When an SBOM was generated (inputs.sbom == 'true' and <working_directory>/sbom.json
+  exists), it is attached to the created release.
 -%>
 - name: Create GitHub release
   shell: bash
@@ -15,6 +17,8 @@
     RELEASE_TITLE: ${{ inputs.release_title }}
     NOTES_B64: ${{ inputs.notes }}
     SHA: ${{ inputs.sha }}
+    SBOM_ENABLED: ${{ inputs.sbom }}
+    WORKING_DIRECTORY: ${{ inputs.working_directory }}
   run: |
     if [ "$ENABLED" != "true" ]; then
       echo "GitHub release disabled; skipping."
@@ -32,4 +36,8 @@
         --title "$TITLE" \
         --notes-file /tmp/release-notes.md \
         --target "$SHA"
+      # Attach the SBOM when one was generated for this release.
+      if [ "$SBOM_ENABLED" = "true" ] && [ -f "$WORKING_DIRECTORY/sbom.json" ]; then
+        gh release upload "$TAG" "$WORKING_DIRECTORY/sbom.json" --clobber
+      fi
     fi

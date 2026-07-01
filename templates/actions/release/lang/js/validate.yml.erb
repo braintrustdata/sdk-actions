@@ -2,8 +2,9 @@ name: Validate JavaScript Release
 description: >
   Checks out the release SHA, sets up Node and pnpm, reads the
   package version, validates the release channel and metadata (tag existence,
-  branch, commit metadata), and builds to confirm the package is publishable
-  before the approval gate.
+  branch, commit metadata), builds, and generates a CycloneDX SBOM — all to
+  confirm the package is publishable (and the SBOM tooling works) before the
+  approval gate.
 
 inputs:
   sha:
@@ -66,6 +67,13 @@ inputs:
     description: "npm script to run for the build (when build is 'true')"
     required: false
     default: 'build'
+  sbom:
+    description: >
+      Generate a CycloneDX SBOM as a pre-gate check (same generator as publish), so
+      SBOM-tooling failures (e.g. pnpm < 11.8) surface BEFORE the approval gate. The
+      SBOM is not signed or attached here — that happens in publish.
+    required: false
+    default: 'true'
 outputs:
   release_tag:
     description: "The release tag (e.g. v0.3.2)"
@@ -105,5 +113,8 @@ runs:
 <%= render_step('release/validate', version: "${{ steps.read-version.outputs.version }}", tag_format: "${{ inputs.tag_format }}") %>
 
 <%= render_step('lang/js/build', if: "${{ inputs.build == 'true' }}") %>
+
+<%# Pre-gate check: confirm SBOM generation works before the approval gate (not signed here). -%>
+<%= render_step('release/lang/js/sbom', if: "${{ inputs.sbom == 'true' }}") %>
 
 <%= render_step('lang/js/env-dump', if: "${{ failure() }}") %>

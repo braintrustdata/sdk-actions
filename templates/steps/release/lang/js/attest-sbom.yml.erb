@@ -1,0 +1,24 @@
+<%#
+  Signs the JS SBOM against the published tarball — with NO post-publish refetch.
+  In pnpm ≥ 11.8, `pnpm pack` emits the exact bytes `pnpm publish` uploads (verified:
+  identical integrity), so we pack, attest that file, and let the later
+  `pnpm publish` (from the same tree) upload the identical tarball. Attesting BEFORE
+  publish means a failed attestation can never leave a published package without a
+  signed SBOM. The composing action gates BOTH steps with a single `if:` (sbom
+  enabled AND not a dry run — nothing is published on a dry run), stamped onto each.
+
+  @param working_directory [String] expr for the package root. Default: ${{ inputs.working_directory }}
+-%>
+- name: Pack tarball for SBOM attestation
+  shell: bash
+  working-directory: <%= locals.fetch(:working_directory) { "${{ inputs.working_directory }}" } %>
+  run: |
+    # pnpm pack emits the exact tarball `pnpm publish` will upload (one packing
+    # pipeline in pnpm ≥ 11.8), so attesting it binds the SBOM to the published
+    # digest. Packed into a temp dir OUTSIDE the package so it can't be published.
+    PACKDIR=$(mktemp -d)
+    pnpm pack --pack-destination "$PACKDIR" >/dev/null
+    mv "$PACKDIR"/*.tgz "$RUNNER_TEMP/sbom-subject.tgz"
+<%= render_step('release/attest-sbom', indent: 0,
+      subject_path: "${{ runner.temp }}/sbom-subject.tgz",
+      sbom_path: "#{locals.fetch(:working_directory) { "${{ inputs.working_directory }}" }}/sbom.json") %>

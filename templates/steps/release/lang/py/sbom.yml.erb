@@ -1,0 +1,24 @@
+<%#
+  Generates a CycloneDX SBOM for the built distribution and writes it to
+  <working_directory>/sbom.json using cyclonedx-py (OWASP CycloneDX, pinned), run
+  ephemerally via uvx so it is never a project dependency. cyclonedx-py has no
+  native uv-lockfile reader, so we install the just-built wheel into a throwaway
+  venv and scan that environment — the SBOM is the wheel's resolved runtime
+  closure. The composing action gates this step with `if: inputs.sbom == 'true'`
+  (it still runs on dry runs, so the SBOM is previewed; signing/upload are gated
+  separately). Assumes lang/py/build produced <working_directory>/dist/*.whl.
+
+  @param working_directory [String] expr for the package root. Default: ${{ inputs.working_directory }}
+-%>
+- name: Generate SBOM (CycloneDX)
+  shell: bash
+  working-directory: <%= locals.fetch(:working_directory) { "${{ inputs.working_directory }}" } %>
+  run: |
+    # cyclonedx-py can't read uv lockfiles, so scan the wheel's installed closure:
+    # install the built wheel into a throwaway venv, then generate from that env.
+    SBOM_VENV="$(mktemp -d)/venv"
+    uv venv "$SBOM_VENV"
+    uv pip install --python "$SBOM_VENV/bin/python" dist/*.whl
+    uvx --from "cyclonedx-bom==7.3.0" cyclonedx-py environment "$SBOM_VENV" \
+      --spec-version 1.7 --output-format JSON --output-file sbom.json
+    echo "Wrote $(pwd)/sbom.json"

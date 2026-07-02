@@ -3,8 +3,9 @@ name: Validate Python Release
 description: >
   Checks out the release SHA, sets up uv and Python, reads the package
   version, validates the release metadata (tag existence, branch, commit
-  metadata) and that the version is not already on PyPI, then builds to confirm
-  the package is publishable before the approval gate.
+  metadata) and that the version is not already on PyPI, then builds and generates
+  a CycloneDX SBOM — confirming the package is publishable (and the SBOM tooling
+  works) before the approval gate.
 
 inputs:
   sha:
@@ -51,6 +52,13 @@ inputs:
     description: "Override build command. When empty, `uv build` is used."
     required: false
     default: ''
+  sbom:
+    description: >
+      Generate a CycloneDX SBOM as a pre-gate check (same generator as publish), so
+      SBOM-tooling failures surface BEFORE the approval gate. Not signed or attached
+      here — that happens in publish.
+    required: false
+    default: 'true'
 outputs:
   release_tag:
     description: "The release tag (e.g. py-0.3.2)"
@@ -218,6 +226,20 @@ runs:
           uv build
         fi
         uvx twine check dist/*
+
+    - name: Generate SBOM (CycloneDX)
+      if: ${{ inputs.sbom == 'true' }}
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      run: |
+        # cyclonedx-py can't read uv lockfiles, so scan the wheel's installed closure:
+        # install the built wheel into a throwaway venv, then generate from that env.
+        SBOM_VENV="$(mktemp -d)/venv"
+        uv venv "$SBOM_VENV"
+        uv pip install --python "$SBOM_VENV/bin/python" dist/*.whl
+        uvx --from "cyclonedx-bom==7.3.0" cyclonedx-py environment "$SBOM_VENV" \
+          --spec-version 1.7 --output-format JSON --output-file sbom.json
+        echo "Wrote $(pwd)/sbom.json"
 
     - name: Dump Python environment
       if: ${{ failure() }}

@@ -98,9 +98,14 @@ copied verbatim. `render_step(name, indent: 4, **locals)`:
 
 - **Control flow lives in the action.** Compose pure "do" steps, then a terminal
   failure handler: `… → render_step('on-failure', if: "${{ failure() }}")`.
-- **Non-control conditions are shell self-guards, not `if:`.** "Slack
-  configured?", "dry run?", "create a GitHub release?" are handled with an early
-  `exit 0` inside the step's own `run:` — so there's never an `if:` for the
-  generator to merge, and control flow stays readable at the call site.
+- **A toggle that enables/disables a whole step uses `if:` at the call site.**
+  e.g. `render_step('lang/js/build', if: "${{ inputs.build == 'true' }}")` and
+  `render_step('release/lang/ruby/sbom', if: "${{ inputs.sbom == 'true' }}")`.
+  Attestation steps (which must not run pre-approval or on dry runs) are gated the
+  same way: `if: "${{ inputs.sbom == 'true' && inputs.dry_run != 'true' }}"`.
+- **A condition that changes behavior *within* a step is a shell self-guard, not
+  `if:`.** "Slack configured?", "dry run → skip the push but still preview", "create
+  a GitHub release?" are handled with an early `exit 0` (or a branch) inside the
+  step's own `run:` — keeping the step self-contained and the call site readable.
 
 

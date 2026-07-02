@@ -3,8 +3,9 @@ name: Validate JavaScript Release
 description: >
   Checks out the release SHA, sets up Node and pnpm, reads the
   package version, validates the release channel and metadata (tag existence,
-  branch, commit metadata), and builds to confirm the package is publishable
-  before the approval gate.
+  branch, commit metadata), builds, and generates a CycloneDX SBOM — all to
+  confirm the package is publishable (and the SBOM tooling works) before the
+  approval gate.
 
 inputs:
   sha:
@@ -67,6 +68,13 @@ inputs:
     description: "npm script to run for the build (when build is 'true')"
     required: false
     default: 'build'
+  sbom:
+    description: >
+      Generate a CycloneDX SBOM as a pre-gate check (same generator as publish), so
+      SBOM-tooling failures (e.g. pnpm < 11.8) surface BEFORE the approval gate. The
+      SBOM is not signed or attached here — that happens in publish.
+    required: false
+    default: 'true'
 outputs:
   release_tag:
     description: "The release tag (e.g. v0.3.2)"
@@ -259,6 +267,18 @@ runs:
         BUILD_COMMAND: ${{ inputs.build_command }}
       run: |
         pnpm run "$BUILD_COMMAND"
+
+    - name: Generate SBOM (CycloneDX)
+      if: ${{ inputs.sbom == 'true' }}
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      run: |
+        if ! pnpm sbom --help >/dev/null 2>&1; then
+          echo "::error title=pnpm sbom unavailable::'pnpm sbom' needs pnpm >= 11.8. Set the package's packageManager (or pnpm_version) to >= 11.8."
+          exit 1
+        fi
+        pnpm sbom --sbom-format cyclonedx --prod --out sbom.json
+        echo "Wrote $(pwd)/sbom.json"
 
     - name: Dump JavaScript environment
       if: ${{ failure() }}

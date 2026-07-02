@@ -1,15 +1,27 @@
 <%#
-  Pushes the gem to RubyGems with OIDC trusted publishing and
-  SLSA attestation via rubygems/release-gem. On a dry run, builds without
-  pushing. Assumes Ruby is already set up.
+  Publishes the PRE-BUILT gem to RubyGems via OIDC trusted publishing — pushing the
+  exact gem built (and attested) earlier, with NO rebuild, so the attested digest is
+  the published digest. Uses rubygems/configure-rubygems-credentials (the official
+  RubyGems OIDC action, the same one rubygems/release-gem uses internally) to obtain
+  a short-lived trusted-publishing token, then `gem push`. On a dry run, skips both
+  credential setup and the push. Requires id-token: write and a RubyGems trusted
+  publisher configured for this gem (repo + workflow, and environment if gated).
 -%>
-- name: Publish gem with attestation
-  uses: rubygems/release-gem@052cc82692552de3ef2b81fd670e41d13cba8092 # v1.4.0
-  with:
-    await-release: ${{ inputs.dry_run == 'true' && 'false' || 'true' }}
-    setup-trusted-publisher: ${{ inputs.dry_run == 'true' && 'false' || 'true' }}
-    attestations: ${{ inputs.dry_run == 'true' && 'false' || 'true' }}
-    working-directory: ${{ inputs.working_directory }}
+- name: Configure RubyGems credentials (OIDC trusted publishing)
+  if: ${{ inputs.dry_run != 'true' }}
+  uses: rubygems/configure-rubygems-credentials@dc5a8d8553e6ee01fc26761a49e99e733d17954a # v2.1.0
+- name: Push gem to RubyGems
+  shell: bash
+  working-directory: ${{ inputs.working_directory }}
   env:
-    GITHUB_TOKEN: ${{ github.token }}
     DRY_RUN: ${{ inputs.dry_run }}
+  run: |
+    GEM=$(ls pkg/*.gem)
+    if [ "$DRY_RUN" = "true" ]; then
+      echo "DRY RUN: would gem push $GEM"
+      exit 0
+    fi
+    gem push "$GEM" || {
+      echo "::error title=gem push failed::OIDC/trusted-publisher error → RubyGems must list a trusted publisher for this gem with this repo + workflow (and environment if gated); 'Repushing of gem versions is not allowed' → the version already exists (bump it)."
+      exit 1
+    }

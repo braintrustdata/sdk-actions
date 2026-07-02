@@ -1,0 +1,15 @@
+<%#
+  Generates SLSA build provenance for an artifact via GitHub's official
+  actions/attest-build-provenance (Sigstore → Rekor), verifiable with
+  `gh attestation verify`. Used where the package registry doesn't mint its own
+  provenance (Ruby); npm (`--provenance`) and PyPI (PEP 740) already do.
+  Requires id-token: write + attestations: write. The caller stamps the `if:`
+  (not a dry run) and points subject_path at the built artifact, attested BEFORE
+  publish so a failed attestation never leaves a published artifact without provenance.
+
+  @param subject_path [String] path/glob to the artifact to attest.
+-%>
+- name: Attest build provenance
+  uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+  with:
+    subject-path: <%= locals.fetch(:subject_path) %>

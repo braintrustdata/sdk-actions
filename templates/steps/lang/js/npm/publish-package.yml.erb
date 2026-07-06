@@ -1,0 +1,52 @@
+<%#
+  Publishes the EXACT prebuilt tarball to npm with OIDC trusted publishing (no token)
+  — the publish half of the custom-build ship. Runs `npm publish <tarball>` from the
+  tarball's OWN directory (never a source tree): that dir has no package.json, so a
+  strict-pnpm consumer's devEngines/onFail:error can't fire (the check reads the CWD
+  manifest — verified locally). Publishes the exact attested bytes, so
+  published == attested. Self-guards on the `npm` toggle and dry_run.
+
+  @param tarball    [String] expr for the path to the downloaded tarball.
+  @param npm        [String] publish to npm or not.   Default: ${{ inputs.npm }}
+  @param channel    [String] dist-tag.                Default: ${{ inputs.channel }}
+  @param access     [String] public | restricted.     Default: ${{ inputs.access }}
+  @param provenance [String] emit npm provenance.      Default: ${{ inputs.provenance }}
+  @param registry   [String] registry URL.            Default: ${{ inputs.registry }}
+  @param dry_run    [String] skip the upload.          Default: ${{ inputs.dry_run }}
+-%>
+- name: Publish prebuilt tarball to npm
+  shell: bash
+  env:
+    TGZ: <%= locals.fetch(:tarball) %>
+    NPM_ENABLED: <%= locals.fetch(:npm) { "${{ inputs.npm }}" } %>
+    CHANNEL: <%= locals.fetch(:channel) { "${{ inputs.channel }}" } %>
+    ACCESS: <%= locals.fetch(:access) { "${{ inputs.access }}" } %>
+    PROVENANCE: <%= locals.fetch(:provenance) { "${{ inputs.provenance }}" } %>
+    REGISTRY: <%= locals.fetch(:registry) { "${{ inputs.registry }}" } %>
+    DRY_RUN: <%= locals.fetch(:dry_run) { "${{ inputs.dry_run }}" } %>
+    # Force OIDC: clear any inherited token so publish can't fall back to token auth.
+    NODE_AUTH_TOKEN: ''
+    NPM_TOKEN: ''
+  run: |
+    if [ "$NPM_ENABLED" != "true" ]; then
+      echo "npm registry publishing disabled; skipping."
+      exit 0
+    fi
+    # pnpm can't publish a prebuilt tarball (it re-packs from a dir), so ship uses the
+    # npm CLI directly; pin >= 11.5.1 for OIDC (newer than setup-node's).
+    npm install -g "npm@11.6.2"
+    # Publish from the tarball's OWN directory — no package.json there, so a strict-pnpm
+    # consumer's devEngines onFail:error can't trip (it checks the CWD manifest). A bare
+    # path with a "/" is also read by npm as a GitHub shorthand, so we cd + use ./<file>.
+    DIR=$(dirname "$TGZ"); FILE=$(basename "$TGZ")
+    cd "$DIR"
+    ARGS=(--tag "$CHANNEL" --access "$ACCESS" --registry "$REGISTRY")
+    [ "$PROVENANCE" = "true" ] && ARGS+=(--provenance)
+    if [ "$DRY_RUN" = "true" ]; then
+      echo "DRY RUN: npm publish ./$FILE ${ARGS[*]} --dry-run"
+      ARGS+=(--dry-run)
+    fi
+    npm publish "./$FILE" "${ARGS[@]}" || {
+      echo "::error title=npm publish failed::ENEEDAUTH → the npm trusted publisher must list this repo, workflow, and (if gated) environment; 'cannot publish over <version>' → the version already exists on npm (bump it)."
+      exit 1
+    }

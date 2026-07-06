@@ -1,7 +1,7 @@
 <%#
   The publish failure handler — dumps the JavaScript environment for
   diagnostics and posts a Slack failure notification. Composed as the terminal
-  step of js/publish under `if: failure()`; the composing action stamps that
+  step of js/build-and-ship under `if: failure()`; the composing action stamps that
   guard onto each step here, and slack/send self-guards when Slack isn't set up.
 -%>
 <%= render_step('lang/js/env-dump', indent: 0) %>

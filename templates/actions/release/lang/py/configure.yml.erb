@@ -1,0 +1,103 @@
+name: Configure Python Release
+description: >
+  Derives release facts for a Python package — read-only, no token. Checks out the
+  SHA, sets up uv (with a default Python the action guarantees itself — no
+  python_version input) to read the version, and computes the release tag, the branch
+  (and whether it's a release branch), the commit message, the previous release tag,
+  and the github_release default from release_type. Its outputs feed validate,
+  request-approval, and build-and-ship. Judging/checks live in the validate action;
+  this action never fails on release state.
+
+inputs:
+  sha:
+    description: "Commit SHA being released"
+    required: true
+  version:
+    description: >
+      Explicit version override. If provided, the version is not read from version_file.
+      Use when the version is computed externally (e.g. a run-number auto-bump).
+    required: false
+    default: ''
+  version_file:
+    description: >
+      Path (repo-root-relative) to a Python module exposing VERSION (e.g.
+      py/pkg/version.py). Read when version is not overridden.
+    required: false
+    default: ''
+  working_directory:
+    description: "Path to the package root (where pyproject.toml lives)"
+    required: false
+    default: '.'
+  tag_format:
+    description: "Git tag format, with a {version} placeholder (e.g. py-{version})"
+    required: false
+    default: 'py-{version}'
+  release_type:
+    description: >
+      'stable' | 'prerelease'. Maps to the github_release default (prerelease → no
+      GitHub release). An explicit github_release input overrides this.
+    required: false
+    default: 'stable'
+  github_release:
+    description: "Explicit github_release override ('true'/'false'). Empty → derived from release_type."
+    required: false
+    default: ''
+  release_branch:
+    description: "Comma-separated allowed release branch patterns (globs)."
+    required: false
+    default: 'main'
+outputs:
+  version:
+    description: "The resolved package version"
+    value: ${{ steps.read-version.outputs.version }}
+  release_tag:
+    description: "The release tag (e.g. py-0.3.2)"
+    value: ${{ steps.configure.outputs.release_tag }}
+  prev_release:
+    description: "The previous release tag"
+    value: ${{ steps.configure.outputs.prev_release }}
+  branch:
+    description: "The branch containing the SHA"
+    value: ${{ steps.configure.outputs.branch }}
+  on_release_branch:
+    description: "Whether the SHA is on an allowed release branch"
+    value: ${{ steps.configure.outputs.on_release_branch }}
+  commit_message:
+    description: "The commit message at the SHA"
+    value: ${{ steps.configure.outputs.commit_message }}
+  github_release:
+    description: "Whether a GitHub release should be created"
+    value: ${{ steps.configure.outputs.github_release }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        ref: ${{ inputs.sha }}
+        fetch-depth: 0
+
+    # configure reads the version (version.py) — so it sets up uv with a default Python
+    # itself. The requirement is guaranteed by the action (no python_version input); any
+    # Python reads the version, and the project's pinned toolchain is only needed to
+    # BUILD (validate / build-and-ship). Read-only: no dependency install.
+    - name: Set up uv
+      uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9 # v7.2.0
+      with:
+        python-version: '3.13'
+        # No dependency install here, so leave the cache off — otherwise setup-uv's
+        # post-job save-cache errors on the empty cache and fails the job.
+        enable-cache: "false"
+
+<%= render_step('lang/py/read-version') %>
+
+<%= render_step('release/configure',
+      version:        "${{ steps.read-version.outputs.version }}",
+      sha:            "${{ inputs.sha }}",
+      tag_format:     "${{ inputs.tag_format }}",
+      release_branch: "${{ inputs.release_branch }}",
+      release_type:   "${{ inputs.release_type }}",
+      channel:        "",
+      github_release: "${{ inputs.github_release }}") %>
+
+<%= render_step('lang/py/env-dump', if: "${{ failure() }}") %>

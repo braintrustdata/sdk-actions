@@ -1,11 +1,11 @@
-name: Publish Python Package
+name: Build and Ship Python Package
 description: >
-  Full Python package release: checks out the SHA, sets up uv and Python,
-  builds the sdist + wheel, generates and signs a CycloneDX SBOM (bound to the
-  built dists), publishes to PyPI (OIDC Trusted Publishing with PEP 740
-  attestations), creates a GitHub release (with the SBOM attached), and sends a
-  Slack completion notification. Covers the standard publish sequence for
-  Braintrust PyPI packages.
+  Turnkey Python release — the whole pipeline in one gated job: checks out the SHA,
+  sets up uv and Python, builds the sdist + wheel, generates and signs a CycloneDX SBOM
+  (bound to the built dists), publishes to PyPI (OIDC Trusted Publishing with PEP 740
+  attestations), creates a GitHub release (with the SBOM attached), and announces on
+  Slack. This is the `build → attest → publish → release → announce` pipeline; the
+  custom-build path (pack + ship-package) is the same pipeline split across two jobs.
 
 inputs:
   sha:

@@ -1,10 +1,12 @@
-name: Publish Ruby Package
+name: Build and Ship Ruby Package
 description: >
-  Full Ruby gem release: checks out the SHA, builds the gem, generates and signs a
-  CycloneDX SBOM plus SLSA build provenance (bound to the exact gem), publishes to
-  RubyGems via OIDC trusted publishing (pushing that same gem — no rebuild), creates
-  a GitHub release (with the SBOM attached), and sends a Slack completion
-  notification. Covers the standard publish sequence for all Braintrust Ruby gems.
+  Turnkey Ruby release — the whole pipeline in one gated job: checks out the SHA,
+  builds the gem, generates and signs a CycloneDX SBOM plus SLSA build provenance
+  (bound to the exact gem), publishes to RubyGems via OIDC trusted publishing (pushing
+  that same gem — no rebuild), creates a GitHub release (with the SBOM attached), and
+  announces on Slack. This is the `build → attest → publish → release → announce`
+  pipeline; Ruby's Path C (build once, attest, push that exact gem) is already the
+  custom-build shape un-split.
 
 inputs:
   sha:

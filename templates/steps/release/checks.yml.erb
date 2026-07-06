@@ -1,0 +1,55 @@
+<%#
+  Judges a release against the facts configure derived — the toggleable guards that can
+  fail on repository/registry state. Each is a boolean input defaulting to 'true'
+  (enforce_release_branch defaults 'false'), so a repo owner can opt out of any check.
+  Assumes the repo is checked out at the SHA (for the tag-existence check). Channel
+  membership and version availability are separate steps (validate-channel, the <lang>
+  availability check). Failures here are pre-gate — a bad release is caught before the
+  approval gate.
+
+  @param release_tag            [String] expr for the derived tag.        Default: ${{ inputs.release_tag }}
+  @param dry_run                [String] expr; warn instead of fail on an existing tag. Default: ${{ inputs.dry_run }}
+  @param on_release_branch      [String] expr.                            Default: ${{ inputs.on_release_branch }}
+  @param notes                  [String] expr; base64 release notes.      Default: ${{ inputs.notes }}
+  @param check_tag_unused       [String] toggle. Default: ${{ inputs.check_tag_unused }}
+  @param check_notes_not_blank  [String] toggle. Default: ${{ inputs.check_notes_not_blank }}
+  @param enforce_release_branch [String] toggle. Default: ${{ inputs.enforce_release_branch }}
+-%>
+- name: Check release
+  shell: bash
+  env:
+    TAG: <%= locals.fetch(:release_tag) { "${{ inputs.release_tag }}" } %>
+    DRY_RUN: <%= locals.fetch(:dry_run) { "${{ inputs.dry_run }}" } %>
+    ON_RELEASE_BRANCH: <%= locals.fetch(:on_release_branch) { "${{ inputs.on_release_branch }}" } %>
+    NOTES_B64: <%= locals.fetch(:notes) { "${{ inputs.notes }}" } %>
+    CHECK_TAG_UNUSED: <%= locals.fetch(:check_tag_unused) { "${{ inputs.check_tag_unused }}" } %>
+    CHECK_NOTES: <%= locals.fetch(:check_notes_not_blank) { "${{ inputs.check_notes_not_blank }}" } %>
+    ENFORCE_RELEASE_BRANCH: <%= locals.fetch(:enforce_release_branch) { "${{ inputs.enforce_release_branch }}" } %>
+  run: |
+    # Tag not already used (covers stable releases; prereleases are covered by the availability check)
+    if [ "$CHECK_TAG_UNUSED" = "true" ] && git rev-parse "$TAG" >/dev/null 2>&1; then
+      if [ "$DRY_RUN" = "true" ]; then
+        echo "::warning title=Release tag already exists::Tag $TAG already exists — skipping in dry run."
+      else
+        echo "::error title=Release tag already exists::Tag $TAG already exists — has the version been bumped?"
+        exit 1
+      fi
+    fi
+
+    # On a release branch: warn by default, hard-fail only when enforced.
+    if [ "$ON_RELEASE_BRANCH" = "false" ]; then
+      if [ "$ENFORCE_RELEASE_BRANCH" = "true" ]; then
+        echo "::error title=Off release branch::the release SHA is not on an allowed release branch (enforce_release_branch=true)."
+        exit 1
+      else
+        echo "::warning title=Off release branch::the release SHA is not on an allowed release branch — releasing anyway."
+      fi
+    fi
+
+    # Release notes present (warn only — a genuine first release, or no PRs since the last tag, is legitimate).
+    if [ "$CHECK_NOTES" = "true" ]; then
+      NOTES=$(echo "$NOTES_B64" | base64 -d 2>/dev/null || echo "")
+      if [ -z "$NOTES" ]; then
+        echo "::warning title=Empty release notes::no release notes were generated (first release, or no PRs since the last tag?)."
+      fi
+    fi

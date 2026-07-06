@@ -1,0 +1,57 @@
+name: Pack Ruby Package (custom build)
+description: >
+  Custom-build side (unprivileged — no publish credentials): checks out the SHA, builds
+  the gem, generates a CycloneDX SBOM, and attests the SBOM + SLSA build provenance to
+  that exact gem. The workflow uploads pkg/*.gem + sbom.json for the gated ship-package
+  job. Requires id-token: write + attestations: write.
+
+inputs:
+  sha:
+    description: "Commit SHA to check out and pack"
+    required: true
+  checkout:
+    description: "Check out the SHA before building. Set to false when the caller already checked out."
+    required: false
+    default: 'true'
+  working_directory:
+    description: "Path to the gem root (where Gemfile and gemspec live)"
+    required: false
+    default: '.'
+  ruby_version:
+    description: "Ruby version to build with, or a version file path (.tool-versions, .ruby-version)"
+    required: false
+    default: '4.0'
+  sbom:
+    description: "Generate + attest a CycloneDX SBOM bound to the gem. Requires attestations: write."
+    required: false
+    default: 'true'
+  dry_run:
+    description: "Skip attestation (nothing is uploaded to the transparency log on a dry run)"
+    required: false
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      if: ${{ inputs.checkout == 'true' }}
+      with:
+        ref: ${{ inputs.sha }}
+        fetch-depth: 0
+
+<%= render_step('lang/ruby/setup') %>
+
+<%= render_step('lang/ruby/build') %>
+
+<%= render_step('lang/ruby/sbom', if: "${{ inputs.sbom == 'true' }}") %>
+
+<%= render_step('release/attest-sbom',
+      if:           "${{ inputs.sbom == 'true' && inputs.dry_run != 'true' }}",
+      subject_path: "${{ inputs.working_directory }}/pkg/*.gem",
+      sbom_path:    "${{ inputs.working_directory }}/sbom.json") %>
+
+<%= render_step('release/attest-provenance',
+      if:           "${{ inputs.dry_run != 'true' }}",
+      subject_path: "${{ inputs.working_directory }}/pkg/*.gem") %>
+
+<%= render_step('lang/ruby/env-dump', if: "${{ failure() }}") %>

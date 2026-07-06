@@ -1,0 +1,20 @@
+<%#
+  Sets up Bun and installs dependencies (frozen). The Bun analogue of lang/js/setup.
+  When bun_version is empty, setup-bun resolves it from the project (.tool-versions /
+  package.json) or falls back to latest.
+
+  @param bun_version       [String] Bun version. Empty → auto-detect. Default: ${{ inputs.bun_version }}
+  @param working_directory [String] package root. Default: ${{ inputs.working_directory }}
+-%>
+- name: Set up Bun
+  uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+  with:
+    bun-version: <%= locals.fetch(:bun_version) { "${{ inputs.bun_version }}" } %>
+- name: Install dependencies
+  shell: bash
+  working-directory: <%= locals.fetch(:working_directory) { "${{ inputs.working_directory }}" } %>
+  run: |
+    bun install --frozen-lockfile || {
+      echo "::error title=Dependency install failed::'bun install --frozen-lockfile' failed — the lockfile is likely out of sync with package.json (run 'bun install' and commit bun.lock)."
+      exit 1
+    }

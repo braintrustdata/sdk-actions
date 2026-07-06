@@ -32,3 +32,5 @@
     # Installs this Python and exports UV_PYTHON for the job, so subsequent uv
     # commands (build, read-version) use it.
     python-version: ${{ steps.py-src.outputs.spec }}
+    # Don't fail the job when there's nothing to cache (jobs that install no deps).
+    ignore-nothing-to-cache: "true"

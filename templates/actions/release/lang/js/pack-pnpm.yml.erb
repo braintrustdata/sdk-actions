@@ -1,0 +1,89 @@
+name: Pack JavaScript Package (custom build, pnpm)
+description: >
+  Build side of the custom-build ("build-ownership") path for a pnpm project — runs in
+  an UNPRIVILEGED job with NO publish credentials. Checks out the SHA, builds, packs the
+  exact tarball (`pnpm pack`), generates a CycloneDX SBOM (`pnpm sbom`), and attests both
+  the SBOM and SLSA build provenance to that tarball. The workflow uploads the tarball +
+  SBOM for the gated ship-package job to verify and publish. This is the
+  `build → pack → attest` prefix of the pipeline; ship-package is the
+  `publish → release → announce` suffix. Requires id-token: write + attestations: write
+  (but NOT publish credentials). Bun projects use pack-bun instead.
+
+inputs:
+  sha:
+    description: "Commit SHA to check out and pack"
+    required: true
+  checkout:
+    description: "Check out the SHA before packing. Set to false when the caller has already checked out and built."
+    required: false
+    default: 'true'
+  working_directory:
+    description: "Path to the package root (where package.json lives)"
+    required: false
+    default: '.'
+  node_version:
+    description: >
+      Node version (e.g. 24), or a path to a version file
+      (.tool-versions, .nvmrc, .node-version) relative to the repo root.
+    required: true
+  pnpm_version:
+    description: "pnpm version to install. When empty, read from package.json packageManager."
+    required: false
+    default: ''
+  build:
+    description: >
+      Whether to run the build step. Set to 'false' when the consumer's own build
+      already ran (the common monorepo case) — pack then just packages the output.
+    required: false
+    default: 'true'
+  build_command:
+    description: "npm script to run for the build (when build is 'true')"
+    required: false
+    default: 'build'
+  sbom:
+    description: "Generate + attest a CycloneDX SBOM bound to the packed tarball. Requires attestations: write."
+    required: false
+    default: 'true'
+  dry_run:
+    description: "Skip attestation (nothing is uploaded to the transparency log on a dry run)"
+    required: false
+    default: 'false'
+outputs:
+  tarball:
+    description: "Absolute path to the packed tarball (the exact bytes ship-package will publish)"
+    value: ${{ steps.pack.outputs.tarball }}
+  integrity:
+    description: "sha512 integrity of the packed tarball"
+    value: ${{ steps.pack.outputs.integrity }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      if: ${{ inputs.checkout == 'true' }}
+      with:
+        ref: ${{ inputs.sha }}
+        fetch-depth: 0
+
+<%= render_step('lang/js/pnpm/setup') %>
+
+<%= render_step('lang/js/pnpm/build', if: "${{ inputs.build == 'true' }}") %>
+
+<%= render_step('lang/js/pnpm/pack') %>
+
+<%= render_step('release/lang/js/validate-package') %>
+
+<%= render_step('lang/js/pnpm/sbom', if: "${{ inputs.sbom == 'true' }}") %>
+
+<%# Attest the packed tarball BEFORE it leaves this job. Skipped on dry runs (nothing
+    should hit the transparency log for a build that won't be published). -%>
+<%= render_step('release/attest-sbom',
+      if:           "${{ inputs.sbom == 'true' && inputs.dry_run != 'true' }}",
+      subject_path: "${{ steps.pack.outputs.tarball }}",
+      sbom_path:    "${{ inputs.working_directory }}/sbom.json") %>
+
+<%= render_step('release/attest-provenance',
+      if:           "${{ inputs.dry_run != 'true' }}",
+      subject_path: "${{ steps.pack.outputs.tarball }}") %>
+
+<%= render_step('lang/js/env-dump', if: "${{ failure() }}") %>

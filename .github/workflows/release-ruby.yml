@@ -4,7 +4,8 @@
 #
 # This workflow serves two purposes:
 #   1. End-to-end testing of the composite actions in actions/release/
-#   2. Reference implementation of the Ruby-specific release template
+#   2. Reference implementation of the v2 Ruby TURNKEY release shape
+#      (build-and-ship): configure → prepare → validate → request-approval → [gate] → build-and-ship
 #
 # Generic steps are provided by composite actions in actions/release/.
 # Only the sections marked with inline comments need to change for other Ruby gems.
@@ -17,11 +18,9 @@
 #   publish
 #     - Required reviewers: sdk-eng team or named maintainers
 #     - Prevent self-review: enabled
-#     - Deployment branches: main only
 #   publish-dry-run
 #     - Required reviewers: at least yourself (to test the approval gate)
 #     - Allow administrators to bypass: enabled (for testing flexibility)
-#     - Deployment branches: no restriction
 #
 # Repository Variables (Settings → Secrets and variables → Variables):
 #   SLACK_SDK_RELEASE_CHANNEL   Slack channel ID for release notifications
@@ -55,6 +54,13 @@ on:
         type: string
         default: "I have merged a version bump PR"
         required: false
+      release_type:
+        description: "Release type — maps to the github_release default (prerelease → no GitHub release)"
+        type: choice
+        default: stable
+        options:
+          - stable
+          - prerelease
       sha:
         description: "Commit SHA (of the version bump) to release"
         required: true
@@ -87,46 +93,44 @@ jobs:
         run: |
           # Gem may not exist yet (first release / new name) → curl 404s and the
           # pipeline yields no version; default to 0.0.0 so the first publish is 0.0.1.
-          # (Robust whether or not the shell has pipefail set.)
           CURRENT=$(curl -sf https://rubygems.org/api/v1/gems/bt-publishing-test.json 2>/dev/null | jq -r '.version // empty' 2>/dev/null || true)
           CURRENT=${CURRENT:-0.0.0}
           IFS='.' read -r major minor patch <<< "$CURRENT"
           echo "version=$major.$minor.$((patch + 1))" >> $GITHUB_OUTPUT
 
-  validate:
+  # DERIVE — read-only facts (version, tag, branch, …). No token; sets up a default Ruby to read the version.
+  configure:
     needs: bump
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 5
     permissions:
       contents: read
     outputs:
-      release_tag: ${{ steps.validate-release.outputs.release_tag }}
-      prev_release: ${{ steps.validate-release.outputs.prev_release }}
-      branch: ${{ steps.validate-release.outputs.branch }}
-      on_release_branch: ${{ steps.validate-release.outputs.on_release_branch }}
-      commit_message: ${{ steps.validate-release.outputs.commit_message }}
+      version: ${{ steps.configure.outputs.version }}
+      release_tag: ${{ steps.configure.outputs.release_tag }}
+      prev_release: ${{ steps.configure.outputs.prev_release }}
+      branch: ${{ steps.configure.outputs.branch }}
+      on_release_branch: ${{ steps.configure.outputs.on_release_branch }}
+      commit_message: ${{ steps.configure.outputs.commit_message }}
+      github_release: ${{ steps.configure.outputs.github_release }}
     steps:
-      # bt-publishing-test: checkout required to resolve local ./actions/... references.
-      # Real SDK workflows use external braintrustdata/sdk-actions/...@sha references
-      # and do not need this step.
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Validate release
-        id: validate-release
-        uses: ./actions/release/lang/ruby/validate
+      - name: Configure release
+        id: configure
+        uses: ./actions/release/lang/ruby/configure
         with:
-          # bt-publishing-test: version passed directly from bump job — no version file needed.
+          # bt-publishing-test: version passed directly from the bump job.
           # In a real Ruby project, replace `version` with:
           #   version_file: lib/your_gem/version.rb
           #   version_module: YourGem
           version: ${{ needs.bump.outputs.version }}
           sha: ${{ inputs.sha || github.event.pull_request.head.sha }}
-          dry_run: ${{ inputs.dry_run || github.event_name == 'pull_request' }}
           working_directory: test/release/ruby
-          package_name: bt-publishing-test # exercises the RubyGems-availability fail-fast check
+          release_type: ${{ inputs.release_type || 'stable' }}
 
   prepare:
-    needs: validate
+    needs: configure
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -135,60 +139,75 @@ jobs:
       pr_list: ${{ steps.prepare.outputs.pr_list }}
       notes: ${{ steps.prepare.outputs.notes }}
     steps:
-      # bt-publishing-test: checkout required because actions are referenced locally (./actions/...).
-      # Real SDK workflows reference actions externally (braintrustdata/sdk-actions/...@sha)
-      # and do not need this step.
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Prepare release
         id: prepare
         uses: ./actions/release/prepare
         with:
-          release_tag: ${{ needs.validate.outputs.release_tag }}
+          release_tag: ${{ needs.configure.outputs.release_tag }}
           sha: ${{ inputs.sha || github.event.pull_request.head.sha }}
           # On PR auto dry-runs, anchor notes to the head SHA: prepare treats a
           # full SHA as "notes unavailable" (no tag range), so the changelog
           # doesn't accumulate in the step summary on every PR.
-          prev_release: ${{ inputs.prev_release || github.event.pull_request.head.sha || needs.validate.outputs.prev_release }}
+          prev_release: ${{ inputs.prev_release || github.event.pull_request.head.sha || needs.configure.outputs.prev_release }}
 
-  notify-pending:
-    needs: [validate, prepare]
+  # JUDGE — toggleable checks + lint + a pre-gate build & SBOM, using the facts configure derived.
+  validate:
+    needs: [configure, prepare]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Validate release
+        uses: ./actions/release/lang/ruby/validate
+        with:
+          version: ${{ needs.configure.outputs.version }}
+          sha: ${{ inputs.sha || github.event.pull_request.head.sha }}
+          dry_run: ${{ inputs.dry_run || github.event_name == 'pull_request' }}
+          working_directory: test/release/ruby
+          package_name: bt-publishing-test # exercises the RubyGems-availability check
+          release_tag: ${{ needs.configure.outputs.release_tag }}
+          on_release_branch: ${{ needs.configure.outputs.on_release_branch }}
+          notes: ${{ needs.prepare.outputs.notes }}
+
+  # NOTIFY — issues the approval request (green the moment it posts; the real gate is on build-and-ship).
+  request-approval:
+    needs: [configure, prepare, validate]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions: {}
     steps:
-      # bt-publishing-test: checkout required for local action resolution (see prepare job comment)
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Notify release pending
-        uses: ./actions/release/notify-pending
+      - name: Request release approval
+        uses: ./actions/release/request-approval
         with:
           sha: ${{ inputs.sha || github.event.pull_request.head.sha }}
-          release_tag: ${{ needs.validate.outputs.release_tag }}
-          prev_release: ${{ needs.validate.outputs.prev_release }}
-          branch: ${{ needs.validate.outputs.branch }}
-          on_release_branch: ${{ needs.validate.outputs.on_release_branch }}
-          commit_message: ${{ needs.validate.outputs.commit_message }}
+          release_tag: ${{ needs.configure.outputs.release_tag }}
+          prev_release: ${{ needs.configure.outputs.prev_release }}
+          branch: ${{ needs.configure.outputs.branch }}
+          on_release_branch: ${{ needs.configure.outputs.on_release_branch }}
+          commit_message: ${{ needs.configure.outputs.commit_message }}
           pr_list: ${{ needs.prepare.outputs.pr_list }}
           notes: ${{ needs.prepare.outputs.notes }}
           dry_run: ${{ inputs.dry_run || github.event_name == 'pull_request' }}
           # Suppress Slack on PR auto dry-runs (still exercises message-building; just no real post).
-          # Gate on != pull_request: GHA's `A && '' || B` returns B (the '' is falsy), so suppression
-          # must be the trailing '' branch, not the "true" value.
           slack_token: ${{ github.event_name != 'pull_request' && secrets.SLACK_BOT_TOKEN || '' }}
           slack_channel: ${{ github.event_name != 'pull_request' && vars.SLACK_SDK_RELEASE_CHANNEL || '' }}
-          # slack_mention: '@sdk-eng'
-          label: bt-publishing-test # distinguishes this from other packages in this repo
+          label: bt-publishing-test
           emoji: ':ruby:'
 
-  publish:
-    needs: [bump, validate, prepare, notify-pending]
+  # EXECUTE — build → attest → publish → release → announce, in one gated job.
+  build-and-ship:
+    needs: [configure, prepare, validate, request-approval]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     # No environment on PR dry-runs (avoids the approval gate AND the accumulating
     # deployment records); the gated environments apply only to manual dispatch.
-    # Note the structure: empty must be the trailing `|| ''` branch, since GHA's
-    # `cond && '' || X` would fall through to X (the '' is falsy).
     environment: >-
       ${{ github.event_name != 'pull_request'
           && (inputs.dry_run && 'publish-dry-run' || 'publish')
@@ -196,45 +215,46 @@ jobs:
     permissions:
       contents: write
       id-token: write
-      attestations: write  # signed SBOM attestation (actions/attest-sbom)
+      attestations: write  # signed SBOM + SLSA build provenance
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ inputs.sha || github.event.pull_request.head.sha }}
           fetch-depth: 0
 
-      # bt-publishing-test: update both version.rb and Gemfile.lock to the run-number version.
-      # The publish job checks out fresh so both files still reflect the placeholder.
+      # bt-publishing-test: update version.rb and Gemfile.lock to the resolved version (from configure).
+      # The job checks out fresh, so both files still reflect the committed placeholder.
       # Real SDK workflows omit this — both files are committed together in the bump PR.
       - name: Apply version to version.rb and Gemfile.lock
         env:
-          VERSION: ${{ needs.bump.outputs.version }}
+          VERSION: ${{ needs.configure.outputs.version }}
         run: |
           sed -i "s|VERSION = \".*\"|VERSION = \"$VERSION\"|" \
             test/release/ruby/lib/bt_publishing_test/version.rb
           sed -i "s|bt-publishing-test ([0-9]*\.[0-9]*\.[0-9]*)|bt-publishing-test ($VERSION)|" \
             test/release/ruby/Gemfile.lock
 
-      - name: Publish
-        uses: ./actions/release/lang/ruby/publish
+      - name: Build and ship
+        uses: ./actions/release/lang/ruby/build-and-ship
         with:
           sha: ${{ inputs.sha || github.event.pull_request.head.sha }}
-          checkout: 'false' # bt-publishing-test: skip internal checkout — version patching above must survive into the gem build
+          checkout: 'false' # bt-publishing-test: skip internal checkout — version patch above must survive
           working_directory: test/release/ruby
           dry_run: ${{ inputs.dry_run || github.event_name == 'pull_request' }}
-          release_tag: ${{ needs.validate.outputs.release_tag }}
-          github_release: 'false' # bt-publishing-test: omit GitHub release to avoid tag/release pollution from repeated test runs
+          release_tag: ${{ needs.configure.outputs.release_tag }}
+          # ⚠️ TEST-BED EXCEPTION — do NOT copy this into a real workflow. Creating a GitHub release
+          # is the intended default for consumers, who should wire the derived value:
+          #     github_release: ${{ needs.configure.outputs.github_release }}
+          # This workflow auto-runs on every PR and is ephemeral, so it hard-disables releases to
+          # avoid tag/release pollution on the throwaway bt-publishing-test gem.
+          github_release: 'false'
           notes: ${{ needs.prepare.outputs.notes }}
-          prev_release: ${{ needs.validate.outputs.prev_release }}
-          branch: ${{ needs.validate.outputs.branch }}
-          on_release_branch: ${{ needs.validate.outputs.on_release_branch }}
+          prev_release: ${{ needs.configure.outputs.prev_release }}
+          branch: ${{ needs.configure.outputs.branch }}
+          on_release_branch: ${{ needs.configure.outputs.on_release_branch }}
           pr_list: ${{ needs.prepare.outputs.pr_list }}
-          # Suppress Slack on PR auto dry-runs (still exercises message-building; just no real post).
-          # Gate on != pull_request: GHA's `A && '' || B` returns B (the '' is falsy), so suppression
-          # must be the trailing '' branch, not the "true" value.
           slack_token: ${{ github.event_name != 'pull_request' && secrets.SLACK_BOT_TOKEN || '' }}
           slack_channel: ${{ github.event_name != 'pull_request' && vars.SLACK_SDK_RELEASE_CHANNEL || '' }}
-          # slack_mention: '@sdk-eng'
-          # failure_slack_mention: '@sdk-eng'
           gem_name: bt-publishing-test
-          label: bt-publishing-test # distinguishes this from other packages in this repo
+          label: bt-publishing-test
+          emoji: ':ruby:'

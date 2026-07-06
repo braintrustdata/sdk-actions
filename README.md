@@ -4,24 +4,47 @@ Shared GitHub actions and workflows for Braintrust SDK repositories.
 
 ## Releases
 
-**Copy the canonical release workflow template** from `.github/workflows/release-<LANG>.yml` and adapt it for your repository. Using it as an upstream source will enable the implemented release process to receive improvements in the future.
+The release actions provide building blocks for implementing release workflows in your own repository. They contain features for security (e.g. trusted publishing, gating, provenance, SBOM, etc) and convenience (e.g. Slack notifications, summaries, automated GitHub release, etc)
+
+These actions can be used in combination to bootstrap quickly or individually to build out a customized release workflow.
 
 ### Pre-requisites
 
-- **JS**: needs `packageManager` (or `pnpm_version`) **≥ pnpm 11.8** (for `pnpm sbom`)
-- **Ruby**: needs a `rake build` that emits exactly one `pkg/*.gem`.
+- **JS**: needs `packageManager` (or `pnpm_version`) **≥ pnpm 11.8** (for `pnpm sbom`). Bun (custom builds) needs a `bun build … --metafile` build.
+- **Python**: a `uv`-buildable project; Python pinned via `.python-version` / `.tool-versions`.
+- **Ruby**: needs a `rake build` that emits exactly one `pkg/*.gem`, and `rake lint`.
 
 ### Adopting the release workflow
 
-1. **Copy the canonical template** for your language into your repo's
+1. **Pick a shape**:
+   - **Turnkey** builds and publishes for you in one gated job. Recommended for most applications.
+   - **Custom build** lets you build your own artifact and hands it to a publish-only job that verifies and ships it, keeping the same security guarantees.
+
+2. **Copy the canonical template** for your language + shape into your repo's
    `.github/workflows/`:
-      - [`release-js.yml`](.github/workflows/release-js.yml)
-      - [`release-py.yml`](.github/workflows/release-py.yml)
-      - [`release-ruby.yml`](.github/workflows/release-ruby.yml)
-2. **Configure an OIDC trusted publisher** on your registry (npm / PyPI / RubyGems) for this repo + workflow (and environment, if gated) — publishing and attestation use it, no long-lived tokens. (Adapting an existing workflow rather than copying? Also grant the publish job `attestations: write`.)
-3. **Adapt the marked sections** — version source, package/gem name, working directory, and so on; the template's comments flag exactly what changes.
-4. **Record the upstream version you based it on** — the sdk-actions ref (commit SHA or tag) your copy was adapted from, e.g. in a header comment. Tracking it lets you (or an agent) diff your copy against a newer upstream template and sync changes deliberately as this repo evolves.
-5. **Bump the pinned SHA** to pick up action changes. Because each action is self-contained, one SHA bump pulls in the whole updated chain.
+
+   | Language | Turnkey | Custom build |
+   |---|---|---|
+   | JavaScript | [`release-js.yml`](.github/workflows/release-js.yml) | [`release-js-custom.yml`](.github/workflows/release-js-custom.yml) |
+   | Python | [`release-py.yml`](.github/workflows/release-py.yml) | [`release-py-custom.yml`](.github/workflows/release-py-custom.yml) |
+   | Ruby | [`release-ruby.yml`](.github/workflows/release-ruby.yml) | [`release-ruby-custom.yml`](.github/workflows/release-ruby-custom.yml) |
+
+3. **Configure an OIDC trusted publisher** on your registry (npm / PyPI / RubyGems) for this repo + workflow filename (and environment, if gated) — publishing and attestation use it, no long-lived tokens.
+4. **Adapt the template to your package.** The template demonstrates an actual package deploy and includes glue to make that function: other applications will want to remove that glue, so review the whole file before adapting. The comments flag what typically changes (version source, package/gem name, working directory), but they aren't exhaustive.
+5. **Record the upstream SHA you based it on** Copy the sdk-actions commit your copy of the workflow was adapted from, e.g. in a header comment. Tracking it lets you (or an agent) diff your copy against a newer upstream template and sync changes deliberately as this repo evolves.
+
+### Updating a release workflow
+
+Actions are pinned by commit SHA. Bump the SHA to pick up changes. To judge whether a bump is safe, compare the version stamped into each `action.yml` header between the old and new SHA:
+
+```yaml
+# sdk-actions: {"family":"release","version":"1.0.0"}
+
+# Tip: this is machine-readable:
+#   sed -n 's/^# sdk-actions: //p' action.yml | jq -r .version   # → 1.0.0
+```
+
+These actions follow semantic versioning: expect breaking changes when the major version updates.
 
 ### Available release actions
 
@@ -32,14 +55,13 @@ pulls in everything it needs.
 
 | Action | Purpose |
 |---|---|
-| `release/lang/ruby/publish` | Build the gem, generate + sign a CycloneDX SBOM and SLSA build provenance, push to RubyGems (OIDC trusted publishing), create the GitHub release (SBOM attached), and notify |
-| `release/lang/ruby/validate` | Check out the SHA, set up Ruby, read the version, validate the release (tag/branch/metadata), lint + build + generate SBOM (pre-gate check) |
-| `release/lang/js/publish` | Build, generate + sign a CycloneDX SBOM, publish to npm (OIDC trusted publishing + provenance), create the GitHub release (SBOM attached), and notify |
-| `release/lang/js/validate` | Check out the SHA, set up Node + package manager, read the version, validate the release (channel/tag/branch/metadata), build + generate SBOM (pre-gate check) |
-| `release/lang/py/publish` | Build, generate + sign a CycloneDX SBOM, publish to PyPI (OIDC trusted publishing + PEP 740 attestations), create the GitHub release (SBOM attached), and notify |
-| `release/lang/py/validate` | Check out the SHA, set up uv + Python, read the version, validate the release (tag/branch/metadata, PyPI availability), build + generate SBOM (pre-gate check) |
-| `release/notify-pending` | Post the pre-approval job summary and Slack notification |
+| `release/lang/<lang>/configure` | Derive release facts (tag, channel, rc suffix, `github_release`) from the version + `release_type` — read-only |
 | `release/prepare` | Fetch the PR list and release notes |
+| `release/lang/<lang>/validate` | Validate the release (tag / channel / branch / metadata, registry availability) and run a pre-gate build + SBOM generation |
+| `release/request-approval` | Post the pre-approval job summary and Slack notification |
+| `release/lang/<lang>/build-and-ship` | **Turnkey**: build → sign a CycloneDX SBOM (+ build provenance for Ruby) → publish (OIDC trusted publishing) → create the GitHub release (SBOM attached) → notify |
+| `release/lang/js/pack-pnpm` · `pack-bun`, `release/lang/{py,ruby}/pack` | **Custom build**: build + pack + sign SBOM + build provenance in an unprivileged job (no publish credentials) |
+| `release/lang/<lang>/ship-package` | **Custom build**: verify the attestation against the downloaded artifact → publish that exact artifact → create the GitHub release → notify |
 
 Inputs and outputs are documented in each `action.yml`. Reference an action by
 commit SHA:

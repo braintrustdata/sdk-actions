@@ -1,0 +1,35 @@
+<%#
+  Sanity-checks the just-packed tarball before it's attested/uploaded — intrinsic
+  checks only (nothing the consumer has to assert): it exists, its package.json has a
+  name and a version, and it ships actual files (not just package.json — the real
+  footgun is a mis-configured "files"/.npmignore that publishes an empty package).
+  Runs inside pack (same job, before attest): neither independently runnable nor across
+  a security boundary, so it's a step, not an action.
+
+  @param tarball [String] expr for the packed tarball path. Default: ${{ steps.pack.outputs.tarball }}
+-%>
+- name: Validate packed tarball
+  shell: bash
+  env:
+    TGZ: <%= locals.fetch(:tarball) { "${{ steps.pack.outputs.tarball }}" } %>
+  run: |
+    if [ ! -f "$TGZ" ]; then
+      echo "::error title=Package not found::packed tarball does not exist: $TGZ"; exit 1
+    fi
+    PKGJSON=$(tar -xzO -f "$TGZ" package/package.json)
+    NAME=$(printf '%s' "$PKGJSON" | node -pe 'JSON.parse(require("fs").readFileSync(0,"utf8")).name || ""')
+    VER=$(printf '%s' "$PKGJSON" | node -pe 'JSON.parse(require("fs").readFileSync(0,"utf8")).version || ""')
+    # Count shipped files EXCLUDING package.json — a tarball with only package.json means
+    # "files"/.npmignore excluded everything that should ship.
+    CONTENT=$(tar -tzf "$TGZ" | grep '^package/' | grep -vc '^package/package.json$' || true)
+
+    if [ -z "$NAME" ]; then
+      echo "::error title=Invalid package::the packed tarball has no name."; exit 1
+    fi
+    if [ -z "$VER" ]; then
+      echo "::error title=Invalid package::the packed tarball has no version."; exit 1
+    fi
+    if [ "$CONTENT" -lt 1 ]; then
+      echo "::error title=Empty package::the tarball ships only package.json — check the package's \"files\"/.npmignore."; exit 1
+    fi
+    echo "✓ $NAME@$VER — $CONTENT shipped file(s), tarball looks sane"

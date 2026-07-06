@@ -1,0 +1,38 @@
+<%#
+  Verifies the downloaded artifact(s)' attestations — SLSA build provenance + CycloneDX
+  SBOM — against their own bytes, BEFORE publishing. The tamper-evident half of the
+  custom-build handoff: `gh attestation verify` recomputes each file's digest and
+  requires a matching attestation; any mutation in transit → 404 → fails closed
+  (spike-verified). Iterates over every file matching `artifacts`, so it covers a single
+  tarball/gem or a Python dist set (whl + sdist). Needs a GH token with attestations:
+  read. Agnostic — used by every language's ship-package.
+
+  @param artifacts [String] expr; space-separated file glob(s) to verify (e.g. dl/*.tgz, dl/*.whl dl/*.tar.gz).
+  @param repo      [String] expr; owner/repo the attestations live under. Default: ${{ github.repository }}
+-%>
+- name: Verify attestations
+  shell: bash
+  env:
+    GH_TOKEN: ${{ github.token }}
+    ARTIFACTS: <%= locals.fetch(:artifacts) %>
+    REPO: <%= locals.fetch(:repo) { "${{ github.repository }}" } %>
+  run: |
+    shopt -s nullglob
+    FILES=( $ARTIFACTS )
+    if [ ${#FILES[@]} -eq 0 ]; then
+      echo "::error title=Nothing to verify::no artifact files matched '$ARTIFACTS'."
+      exit 1
+    fi
+    for f in "${FILES[@]}"; do
+      echo "Verifying $(basename "$f") — build provenance…"
+      gh attestation verify "$f" --repo "$REPO" || {
+        echo "::error title=Provenance verification failed::no build-provenance attestation matches $(basename "$f") — the artifact was not produced by a trusted build, or was tampered with in transit."
+        exit 1
+      }
+      echo "Verifying $(basename "$f") — SBOM…"
+      gh attestation verify "$f" --repo "$REPO" --predicate-type https://cyclonedx.org/bom || {
+        echo "::error title=SBOM verification failed::no CycloneDX SBOM attestation matches $(basename "$f")."
+        exit 1
+      }
+    done
+    echo "✓ attestations verified for: ${FILES[*]}"

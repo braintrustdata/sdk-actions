@@ -1,10 +1,12 @@
-name: Publish Ruby Package
+name: Build and Ship Ruby Package
 description: >
-  Full Ruby gem release: checks out the SHA, builds the gem, generates and signs a
-  CycloneDX SBOM plus SLSA build provenance (bound to the exact gem), publishes to
-  RubyGems via OIDC trusted publishing (pushing that same gem — no rebuild), creates
-  a GitHub release (with the SBOM attached), and sends a Slack completion
-  notification. Covers the standard publish sequence for all Braintrust Ruby gems.
+  Turnkey Ruby release — the whole pipeline in one gated job: checks out the SHA,
+  builds the gem, generates and signs a CycloneDX SBOM plus SLSA build provenance
+  (bound to the exact gem), publishes to RubyGems via OIDC trusted publishing (pushing
+  that same gem — no rebuild), creates a GitHub release (with the SBOM attached), and
+  announces on Slack. This is the `build → attest → publish → release → announce`
+  pipeline; Ruby's Path C (build once, attest, push that exact gem) is already the
+  custom-build shape un-split.
 
 inputs:
   sha:
@@ -107,9 +109,9 @@ runs:
 
 <%# Single build: the pkg/*.gem produced here is the exact file we attest AND push
     (no rebuild), so the attested digest is guaranteed to be the published digest. -%>
-<%= render_step('release/lang/ruby/build') %>
+<%= render_step('lang/ruby/build') %>
 
-<%= render_step('release/lang/ruby/sbom', if: "${{ inputs.sbom == 'true' }}") %>
+<%= render_step('lang/ruby/sbom', if: "${{ inputs.sbom == 'true' }}") %>
 
 <%# Attest the exact gem BEFORE it is pushed, so a failed attestation never leaves a
     published gem unsigned. -%>
@@ -124,7 +126,7 @@ runs:
       if:           "${{ inputs.dry_run != 'true' }}",
       subject_path: "${{ inputs.working_directory }}/pkg/*.gem") %>
 
-<%= render_step('release/lang/ruby/rubygems-push') %>
+<%= render_step('lang/ruby/rubygems/push') %>
 
 <%= render_step('release/create-github-release') %>
 

@@ -2,9 +2,11 @@
 name: Publish Python Package
 description: >
   Full Python package release: checks out the SHA, sets up uv and Python,
-  builds the sdist + wheel, publishes to PyPI (OIDC Trusted Publishing with PEP
-  740 attestations), creates a GitHub release, and sends a Slack completion
-  notification. Covers the standard publish sequence for Braintrust PyPI packages.
+  builds the sdist + wheel, generates and signs a CycloneDX SBOM (bound to the
+  built dists), publishes to PyPI (OIDC Trusted Publishing with PEP 740
+  attestations), creates a GitHub release (with the SBOM attached), and sends a
+  Slack completion notification. Covers the standard publish sequence for
+  Braintrust PyPI packages.
 
 inputs:
   sha:
@@ -52,6 +54,13 @@ inputs:
     default: 'true'
   attestations:
     description: "Whether to publish PEP 740 attestations (Sigstore-signed provenance). Requires id-token: write."
+    required: false
+    default: 'true'
+  sbom:
+    description: >
+      Generate a CycloneDX SBOM, sign it (GitHub SBOM attestation bound to the
+      published dist), and attach it to the GitHub release. Requires
+      attestations: write on the job.
     required: false
     default: 'true'
   notes:
@@ -153,6 +162,29 @@ runs:
         fi
         uvx twine check dist/*
 
+    - name: Generate SBOM (CycloneDX)
+      if: ${{ inputs.sbom == 'true' }}
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      run: |
+        # cyclonedx-py can't read uv lockfiles, so scan the wheel's installed closure:
+        # install the built wheel into a throwaway venv, then generate from that env.
+        SBOM_VENV="$(mktemp -d)/venv"
+        uv venv "$SBOM_VENV"
+        uv pip install --python "$SBOM_VENV/bin/python" dist/*.whl
+        uvx --from "cyclonedx-bom==7.3.0" cyclonedx-py environment "$SBOM_VENV" \
+          --spec-version 1.7 --output-format JSON --output-file sbom.json
+        echo "Wrote $(pwd)/sbom.json"
+
+    - name: Attest SBOM
+      if: ${{ inputs.sbom == 'true' && inputs.dry_run != 'true' }}
+      uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+      with:
+        subject-path: |-
+          ${{ inputs.working_directory }}/dist/*.whl
+          ${{ inputs.working_directory }}/dist/*.tar.gz
+        sbom-path: ${{ inputs.working_directory }}/sbom.json
+
     - name: Publish to PyPI
       shell: bash
       working-directory: ${{ inputs.working_directory }}
@@ -194,6 +226,8 @@ runs:
         RELEASE_TITLE: ${{ inputs.release_title }}
         NOTES_B64: ${{ inputs.notes }}
         SHA: ${{ inputs.sha }}
+        SBOM_ENABLED: ${{ inputs.sbom }}
+        WORKING_DIRECTORY: ${{ inputs.working_directory }}
       run: |
         if [ "$ENABLED" != "true" ]; then
           echo "GitHub release disabled; skipping."
@@ -211,6 +245,10 @@ runs:
             --title "$TITLE" \
             --notes-file /tmp/release-notes.md \
             --target "$SHA"
+          # Attach the SBOM when one was generated for this release.
+          if [ "$SBOM_ENABLED" = "true" ] && [ -f "$WORKING_DIRECTORY/sbom.json" ]; then
+            gh release upload "$TAG" "$WORKING_DIRECTORY/sbom.json" --clobber
+          fi
         fi
 
     - name: Build PyPI links

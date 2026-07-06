@@ -1,9 +1,10 @@
 name: Publish JavaScript Package
 description: >
   Full JavaScript package release: checks out the SHA, sets up Node and pnpm,
-  builds, publishes to npm (OIDC trusted publishing), creates a
-  GitHub release, and sends a Slack completion notification. Covers the standard
-  publish sequence for Braintrust npm packages.
+  builds, generates and signs a CycloneDX SBOM (bound to the published tarball),
+  publishes to npm (OIDC trusted publishing + provenance), creates a GitHub release
+  (with the SBOM attached), and sends a Slack completion notification. Covers the
+  standard publish sequence for Braintrust npm packages.
 
 inputs:
   sha:
@@ -69,6 +70,13 @@ inputs:
     default: 'public'
   provenance:
     description: "Whether to publish with provenance/attestation (requires a public package)"
+    required: false
+    default: 'true'
+  sbom:
+    description: >
+      Generate a CycloneDX SBOM (pnpm sbom — needs pnpm ≥ 11.8), sign it (GitHub
+      SBOM attestation bound to the published tarball), and attach it to the
+      GitHub release. Requires attestations: write on the job.
     required: false
     default: 'true'
   channel:
@@ -137,6 +145,13 @@ runs:
 <%= render_step('lang/js/setup') %>
 
 <%= render_step('lang/js/build', if: "${{ inputs.build == 'true' }}") %>
+
+<%= render_step('release/lang/js/sbom', if: "${{ inputs.sbom == 'true' }}") %>
+
+<%# Attest BEFORE publish: `pnpm pack` == the bytes `pnpm publish` uploads (pnpm ≥ 11.8),
+    so the SBOM binds to the published digest with no refetch, and a failed attestation
+    never leaves a published-but-unsigned package. -%>
+<%= render_step('release/lang/js/attest-sbom', if: "${{ inputs.sbom == 'true' && inputs.dry_run != 'true' }}") %>
 
 <%= render_step('release/lang/js/npm-publish') %>
 

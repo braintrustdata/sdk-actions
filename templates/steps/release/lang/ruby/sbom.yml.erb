@@ -1,0 +1,74 @@
+<%#
+  Generates a CycloneDX (JSON) SBOM from the gem's Gemfile.lock and writes it to
+  <working_directory>/sbom.json. Handrolled from Bundler's own LockfileParser (a
+  default gem, already in the toolchain) because the OWASP cyclonedx-ruby gem only
+  emits XML, and actions/attest-sbom requires JSON — so no trusted-official JSON
+  generator exists for Ruby. This keeps generation native: no extra tool, binary,
+  or publisher enters the privileged job. The CycloneDX JSON schema and Gemfile.lock
+  format are both stable, so the mapping is small and low-maintenance. Runs before
+  the gem is pushed; describes the gem's resolved dependency closure. The composing
+  action gates this step with `if: inputs.sbom == 'true'`. Assumes lang/ruby/setup
+  ran bundle install so Gemfile.lock is present.
+
+  @param working_directory [String] expr for the gem root. Default: ${{ inputs.working_directory }}
+-%>
+- name: Generate SBOM (CycloneDX)
+  shell: bash
+  working-directory: <%= locals.fetch(:working_directory) { "${{ inputs.working_directory }}" } %>
+  env:
+    GEM_NAME: ${{ inputs.gem_name }}
+  run: |
+    if [ ! -f Gemfile.lock ]; then
+      echo "::error title=SBOM failed::Gemfile.lock not found in $(pwd) — bundle install must run before SBOM generation."
+      exit 1
+    fi
+    # Map Gemfile.lock → CycloneDX 1.6 JSON with Bundler's own lockfile parser.
+    # Only the gem's RUNTIME closure is included: we walk the dependency graph
+    # from the gem itself, so the dev/test toolchain (rubocop, rake, …) that lives
+    # in Gemfile.lock but is not a runtime dependency of the published gem is
+    # excluded. The gem is the SBOM subject (metadata.component), its runtime
+    # dependency closure are the components.
+    ruby <<'RUBY'
+    require 'bundler'
+    require 'json'
+    require 'securerandom'
+    lock = Bundler::LockfileParser.new(File.read('Gemfile.lock'))
+    by_name = lock.specs.each_with_object({}) { |s, h| h[s.name] = s }
+    # The gem being released: prefer the explicit gem_name, else the local
+    # path/gemspec source spec (the gem defined in this repo).
+    root_name = ENV['GEM_NAME'].to_s.empty? ? nil : ENV['GEM_NAME']
+    root = (by_name[root_name] if root_name) ||
+           lock.specs.find { |s| s.source.is_a?(Bundler::Source::Path) }
+    abort("::error title=SBOM failed::could not identify the gem in Gemfile.lock (set gem_name).") unless root
+    # Breadth-first over each spec's runtime dependencies (as recorded per-gem in
+    # the GEM section of the lockfile), starting from the released gem.
+    seen = {}
+    queue = root.dependencies.map(&:name)
+    until queue.empty?
+      name = queue.shift
+      next if seen[name] || !by_name[name]
+      spec = by_name[name]
+      seen[name] = spec
+      queue.concat(spec.dependencies.map(&:name))
+    end
+    component = ->(s) do
+      { 'type' => 'library', 'name' => s.name, 'version' => s.version.to_s,
+        'purl' => "pkg:gem/#{s.name}@#{s.version}" }
+    end
+    bom = {
+      'bomFormat'    => 'CycloneDX',
+      'specVersion'  => '1.7',
+      # Required: actions/attest recognizes CycloneDX only when bomFormat + specVersion
+      # + serialNumber are all present (see actions/attest src/sbom.ts). Don't remove.
+      'serialNumber' => "urn:uuid:#{SecureRandom.uuid}",
+      'version'      => 1,
+      'metadata'    => {
+        # CycloneDX ≥1.5 tools shape (the array-of-tools form was deprecated in 1.5).
+        'tools'     => { 'components' => [{ 'type' => 'application', 'group' => 'braintrust', 'name' => 'sdk-actions ruby sbom' }] },
+        'component' => component.call(root).merge('type' => 'application'),
+      },
+      'components'  => seen.values.sort_by(&:name).map { |s| component.call(s) },
+    }
+    File.write('sbom.json', JSON.pretty_generate(bom))
+    puts "Wrote #{Dir.pwd}/sbom.json (subject: #{root.name}, #{seen.size} runtime components)"
+    RUBY

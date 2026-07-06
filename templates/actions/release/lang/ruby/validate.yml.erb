@@ -2,7 +2,8 @@ name: Validate Ruby Release
 description: >
   Checks out the release SHA, sets up Ruby, reads the gem version, validates
   the release (RubyGems availability, tag existence, branch, commit metadata),
-  and runs lint + build to confirm the gem is publishable before the approval gate.
+  and runs lint, build, and SBOM generation to confirm the gem is publishable
+  (and the SBOM tooling works) before the approval gate.
 
 inputs:
   sha:
@@ -42,6 +43,13 @@ inputs:
     description: "Ruby version to use, or a version file path (.tool-versions, .ruby-version)"
     required: false
     default: '4.0'
+  sbom:
+    description: >
+      Generate a CycloneDX SBOM as a pre-gate check (same generator as publish), so
+      SBOM-generation failures surface BEFORE the approval gate. Not signed or
+      attached here — that happens in publish.
+    required: false
+    default: 'true'
 outputs:
   release_tag:
     description: "The release tag (e.g. v0.3.2)"
@@ -75,14 +83,15 @@ runs:
 
 <%= render_step('release/validate', version: "${{ steps.read-version.outputs.version }}") %>
 
-    - name: Lint and build
+    - name: Lint
       shell: bash
       working-directory: ${{ inputs.working_directory }}
-      env:
-        # Simulate rubygems/release-gem's RUBYOPT injection, which pre-loads gems
-        # (including openssl for attestation) before bundle exec runs. Exposes
-        # default gem activation conflicts before the approval gate.
-        RUBYOPT: "-r openssl"
-      run: bundle exec rake lint build
+      run: bundle exec rake lint
+
+<%# Build the gem (same partial as publish) to confirm it builds before the gate. -%>
+<%= render_step('release/lang/ruby/build') %>
+
+<%# Pre-gate check: confirm SBOM generation works before the approval gate (not signed here). -%>
+<%= render_step('release/lang/ruby/sbom', if: "${{ inputs.sbom == 'true' }}") %>
 
 <%= render_step('lang/ruby/env-dump', if: "${{ failure() }}") %>

@@ -1,0 +1,25 @@
+<%#
+  Signs a CycloneDX SBOM with a GitHub attestation (Sigstore → Rekor) whose
+  subject is the *published* artifact, via GitHub's official actions/attest (the
+  `sbom-path` input; `actions/attest-sbom` is deprecated in favor of this).
+  The action computes the subject digest from the file(s) at subject_path, so the
+  attested digest is exactly the artifact's — the caller must point subject_path
+  at the same bytes that were published. Requires `id-token: write` +
+  `attestations: write` on the job.
+
+  This step has no self-guard: attestations write to a public transparency log,
+  so the caller stamps the `if:` (SBOM enabled AND not a dry run) via render_step.
+
+  @param subject_path [String, Array<String>] path/glob(s) to the published artifact(s) to
+    attest. Pass an array for multiple globs (actions/attest's glob doesn't support braces,
+    and matches dotfiles — so target extensions explicitly, e.g. ['dist/*.whl', 'dist/*.tar.gz']).
+  @param sbom_path    [String] path to the CycloneDX JSON SBOM. Default: sbom.json
+-%>
+- name: Attest SBOM
+  uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+  with:
+    subject-path: |-
+<%- Array(locals.fetch(:subject_path)).each do |path| -%>
+      <%= path %>
+<%- end -%>
+    sbom-path: <%= locals.fetch(:sbom_path) { "sbom.json" } %>

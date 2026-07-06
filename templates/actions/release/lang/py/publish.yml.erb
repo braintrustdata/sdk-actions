@@ -1,9 +1,11 @@
 name: Publish Python Package
 description: >
   Full Python package release: checks out the SHA, sets up uv and Python,
-  builds the sdist + wheel, publishes to PyPI (OIDC Trusted Publishing with PEP
-  740 attestations), creates a GitHub release, and sends a Slack completion
-  notification. Covers the standard publish sequence for Braintrust PyPI packages.
+  builds the sdist + wheel, generates and signs a CycloneDX SBOM (bound to the
+  built dists), publishes to PyPI (OIDC Trusted Publishing with PEP 740
+  attestations), creates a GitHub release (with the SBOM attached), and sends a
+  Slack completion notification. Covers the standard publish sequence for
+  Braintrust PyPI packages.
 
 inputs:
   sha:
@@ -51,6 +53,13 @@ inputs:
     default: 'true'
   attestations:
     description: "Whether to publish PEP 740 attestations (Sigstore-signed provenance). Requires id-token: write."
+    required: false
+    default: 'true'
+  sbom:
+    description: >
+      Generate a CycloneDX SBOM, sign it (GitHub SBOM attestation bound to the
+      published dist), and attach it to the GitHub release. Requires
+      attestations: write on the job.
     required: false
     default: 'true'
   notes:
@@ -115,6 +124,15 @@ runs:
 <%= render_step('lang/py/setup') %>
 
 <%= render_step('lang/py/build') %>
+
+<%= render_step('release/lang/py/sbom', if: "${{ inputs.sbom == 'true' }}") %>
+
+<%# Attest only the distributions. `uv build` drops a `dist/.gitignore`, and actions/attest's
+    glob matches dotfiles (with no brace support), so target the two dist extensions explicitly. -%>
+<%= render_step('release/attest-sbom',
+      if:           "${{ inputs.sbom == 'true' && inputs.dry_run != 'true' }}",
+      subject_path: ["${{ inputs.working_directory }}/dist/*.whl", "${{ inputs.working_directory }}/dist/*.tar.gz"],
+      sbom_path:    "${{ inputs.working_directory }}/sbom.json") %>
 
 <%= render_step('release/lang/py/pypi-publish') %>
 

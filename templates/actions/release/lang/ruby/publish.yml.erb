@@ -1,8 +1,10 @@
 name: Publish Ruby Package
 description: >
-  Full Ruby gem release: checks out the SHA, pushes to RubyGems, creates
-  a GitHub release, and sends a Slack completion notification. Covers the
-  standard publish sequence for all Braintrust Ruby gems.
+  Full Ruby gem release: checks out the SHA, builds the gem, generates and signs a
+  CycloneDX SBOM plus SLSA build provenance (bound to the exact gem), publishes to
+  RubyGems via OIDC trusted publishing (pushing that same gem — no rebuild), creates
+  a GitHub release (with the SBOM attached), and sends a Slack completion
+  notification. Covers the standard publish sequence for all Braintrust Ruby gems.
 
 inputs:
   sha:
@@ -29,6 +31,13 @@ inputs:
     required: true
   github_release:
     description: "Whether to create a GitHub release"
+    required: false
+    default: 'true'
+  sbom:
+    description: >
+      Generate a CycloneDX SBOM, sign it (GitHub SBOM attestation bound to the
+      published gem), and attach it to the GitHub release. Requires
+      attestations: write on the job.
     required: false
     default: 'true'
   release_title:
@@ -95,6 +104,25 @@ runs:
         fetch-depth: 0
 
 <%= render_step('lang/ruby/setup') %>
+
+<%# Single build: the pkg/*.gem produced here is the exact file we attest AND push
+    (no rebuild), so the attested digest is guaranteed to be the published digest. -%>
+<%= render_step('release/lang/ruby/build') %>
+
+<%= render_step('release/lang/ruby/sbom', if: "${{ inputs.sbom == 'true' }}") %>
+
+<%# Attest the exact gem BEFORE it is pushed, so a failed attestation never leaves a
+    published gem unsigned. -%>
+<%= render_step('release/attest-sbom',
+      if:           "${{ inputs.sbom == 'true' && inputs.dry_run != 'true' }}",
+      subject_path: "${{ inputs.working_directory }}/pkg/*.gem",
+      sbom_path:    "${{ inputs.working_directory }}/sbom.json") %>
+
+<%# SLSA build provenance for the gem (RubyGems mints none of its own); replaces
+    rubygems/release-gem's experimental attestation with GitHub's official action. -%>
+<%= render_step('release/attest-provenance',
+      if:           "${{ inputs.dry_run != 'true' }}",
+      subject_path: "${{ inputs.working_directory }}/pkg/*.gem") %>
 
 <%= render_step('release/lang/ruby/rubygems-push') %>
 

@@ -2,8 +2,9 @@ name: Validate Python Release
 description: >
   Checks out the release SHA, sets up uv and Python, reads the package
   version, validates the release metadata (tag existence, branch, commit
-  metadata) and that the version is not already on PyPI, then builds to confirm
-  the package is publishable before the approval gate.
+  metadata) and that the version is not already on PyPI, then builds and generates
+  a CycloneDX SBOM — confirming the package is publishable (and the SBOM tooling
+  works) before the approval gate.
 
 inputs:
   sha:
@@ -50,6 +51,13 @@ inputs:
     description: "Override build command. When empty, `uv build` is used."
     required: false
     default: ''
+  sbom:
+    description: >
+      Generate a CycloneDX SBOM as a pre-gate check (same generator as publish), so
+      SBOM-tooling failures surface BEFORE the approval gate. Not signed or attached
+      here — that happens in publish.
+    required: false
+    default: 'true'
 outputs:
   release_tag:
     description: "The release tag (e.g. py-0.3.2)"
@@ -87,5 +95,8 @@ runs:
 <%= render_step('release/validate', version: "${{ steps.read-version.outputs.version }}", tag_format: "${{ inputs.tag_format }}") %>
 
 <%= render_step('lang/py/build') %>
+
+<%# Pre-gate check: confirm SBOM generation works before the approval gate (not signed here). -%>
+<%= render_step('release/lang/py/sbom', if: "${{ inputs.sbom == 'true' }}") %>
 
 <%= render_step('lang/py/env-dump', if: "${{ failure() }}") %>

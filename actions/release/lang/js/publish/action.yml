@@ -2,9 +2,10 @@
 name: Publish JavaScript Package
 description: >
   Full JavaScript package release: checks out the SHA, sets up Node and pnpm,
-  builds, publishes to npm (OIDC trusted publishing), creates a
-  GitHub release, and sends a Slack completion notification. Covers the standard
-  publish sequence for Braintrust npm packages.
+  builds, generates and signs a CycloneDX SBOM (bound to the published tarball),
+  publishes to npm (OIDC trusted publishing + provenance), creates a GitHub release
+  (with the SBOM attached), and sends a Slack completion notification. Covers the
+  standard publish sequence for Braintrust npm packages.
 
 inputs:
   sha:
@@ -70,6 +71,13 @@ inputs:
     default: 'public'
   provenance:
     description: "Whether to publish with provenance/attestation (requires a public package)"
+    required: false
+    default: 'true'
+  sbom:
+    description: >
+      Generate a CycloneDX SBOM (pnpm sbom — needs pnpm ≥ 11.8), sign it (GitHub
+      SBOM attestation bound to the published tarball), and attach it to the
+      GitHub release. Requires attestations: write on the job.
     required: false
     default: 'true'
   channel:
@@ -187,6 +195,37 @@ runs:
       run: |
         pnpm run "$BUILD_COMMAND"
 
+    - name: Generate SBOM (CycloneDX)
+      if: ${{ inputs.sbom == 'true' }}
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      run: |
+        if ! pnpm sbom --help >/dev/null 2>&1; then
+          echo "::error title=pnpm sbom unavailable::'pnpm sbom' needs pnpm >= 11.8. Set the package's packageManager (or pnpm_version) to >= 11.8."
+          exit 1
+        fi
+        pnpm sbom --sbom-format cyclonedx --prod --out sbom.json
+        echo "Wrote $(pwd)/sbom.json"
+
+    - name: Pack tarball for SBOM attestation
+      if: ${{ inputs.sbom == 'true' && inputs.dry_run != 'true' }}
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      run: |
+        # pnpm pack emits the exact tarball `pnpm publish` will upload (one packing
+        # pipeline in pnpm ≥ 11.8), so attesting it binds the SBOM to the published
+        # digest. Packed into a temp dir OUTSIDE the package so it can't be published.
+        PACKDIR=$(mktemp -d)
+        pnpm pack --pack-destination "$PACKDIR" >/dev/null
+        mv "$PACKDIR"/*.tgz "$RUNNER_TEMP/sbom-subject.tgz"
+    - name: Attest SBOM
+      if: ${{ inputs.sbom == 'true' && inputs.dry_run != 'true' }}
+      uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+      with:
+        subject-path: |-
+          ${{ runner.temp }}/sbom-subject.tgz
+        sbom-path: ${{ inputs.working_directory }}/sbom.json
+
     - name: Publish to npm
       shell: bash
       working-directory: ${{ inputs.working_directory }}
@@ -229,6 +268,8 @@ runs:
         RELEASE_TITLE: ${{ inputs.release_title }}
         NOTES_B64: ${{ inputs.notes }}
         SHA: ${{ inputs.sha }}
+        SBOM_ENABLED: ${{ inputs.sbom }}
+        WORKING_DIRECTORY: ${{ inputs.working_directory }}
       run: |
         if [ "$ENABLED" != "true" ]; then
           echo "GitHub release disabled; skipping."
@@ -246,6 +287,10 @@ runs:
             --title "$TITLE" \
             --notes-file /tmp/release-notes.md \
             --target "$SHA"
+          # Attach the SBOM when one was generated for this release.
+          if [ "$SBOM_ENABLED" = "true" ] && [ -f "$WORKING_DIRECTORY/sbom.json" ]; then
+            gh release upload "$TAG" "$WORKING_DIRECTORY/sbom.json" --clobber
+          fi
         fi
 
     - name: Build npm links

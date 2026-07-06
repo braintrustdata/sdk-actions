@@ -1,0 +1,21 @@
+<%#
+  Builds the gem into <working_directory>/pkg via the gem's own `rake build` task
+  (Bundler convention). This is the SINGLE build: the pkg/*.gem produced here is the
+  exact file we attest AND push (no rebuild anywhere downstream), so the attested
+  digest is guaranteed to be the published digest. Runs unconditionally, so it also
+  validates the build on dry runs.
+
+  Consumer contract: the gem's `rake build` must produce exactly one gem at pkg/*.gem.
+
+  @param working_directory [String] expr for the gem root. Default: ${{ inputs.working_directory }}
+-%>
+- name: Build gem
+  shell: bash
+  working-directory: <%= locals.fetch(:working_directory) { "${{ inputs.working_directory }}" } %>
+  run: |
+    bundle exec rake build
+    if [ "$(ls pkg/*.gem 2>/dev/null | wc -l)" -ne 1 ]; then
+      echo "::error title=Build failed::expected exactly one gem at pkg/*.gem after 'rake build' — found: $(ls pkg/*.gem 2>/dev/null || echo none)"
+      exit 1
+    fi
+    echo "Built $(ls pkg/*.gem)"

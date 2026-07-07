@@ -26,6 +26,27 @@ and regenerate:
 After any change, run `rake generate` and commit `templates/` and the regenerated
 `actions/` **together**. CI fails if they drift.
 
+### Versioning
+
+Each action family (the top directory under `templates/actions/`, e.g. `release`)
+carries a soft-semver in `templates/actions/<family>/VERSION`. `rake generate`
+stamps it into every generated action's header as a machine-readable comment:
+
+```
+# sdk-actions: {"family":"release","version":"1.0.0"}
+```
+
+Consumers pin by SHA and diff this stamp across SHAs to judge upgrade risk, so bump
+`VERSION` when a family's public interface changes and regenerate:
+
+- **major** — breaking (an input removed/renamed, a behavior contract changed)
+- **minor** — additive (new action, new optional input)
+- **patch** — fix
+
+We publish **no git tags** — SHA pinning is the contract. The version is a comment,
+not a YAML key (`action.yml` has no native version field), so it never affects schema
+validation.
+
 ### Commands
 
 | command | what it does |

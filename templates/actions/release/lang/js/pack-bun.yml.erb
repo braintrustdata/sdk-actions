@@ -1,0 +1,92 @@
+name: Pack JavaScript Package (custom build, bun)
+description: >
+  Build side of the custom-build ("build-ownership") path for a Bun project — runs in an
+  UNPRIVILEGED job with NO publish credentials. Sets up Bun, runs `bun build --metafile`
+  (bundling deps into the artifact), packs the npm tarball (`bun pm pack`), generates a
+  CycloneDX SBOM FROM the build metafile (so it matches the bundled artifact), and attests
+  the SBOM + SLSA build provenance to that tarball. The workflow uploads the tarball + SBOM
+  for the gated ship-package job (shared with pnpm). Requires id-token: write +
+  attestations: write. pnpm projects use pack-pnpm instead.
+
+inputs:
+  sha:
+    description: "Commit SHA to check out and pack"
+    required: true
+  checkout:
+    description: "Check out the SHA before building. Set to false when the caller already checked out."
+    required: false
+    default: 'true'
+  working_directory:
+    description: "Path to the package root (where package.json lives)"
+    required: false
+    default: '.'
+  bun_version:
+    description: "Bun version. Empty → auto-detect from the project (.tool-versions / package.json) or latest."
+    required: false
+    default: ''
+  entry:
+    description: "bun build entrypoint"
+    required: false
+    default: 'src/index.ts'
+  outdir:
+    description: "bun build output directory"
+    required: false
+    default: 'dist'
+  target:
+    description: "bun build --target (bun|node|browser)"
+    required: false
+    default: 'bun'
+  format:
+    description: "bun build --format (esm|cjs|iife)"
+    required: false
+    default: 'esm'
+  sbom:
+    description: "Generate + attest a CycloneDX SBOM (from the build metafile). Requires attestations: write."
+    required: false
+    default: 'true'
+  dry_run:
+    description: "Skip attestation (nothing is uploaded to the transparency log on a dry run)"
+    required: false
+    default: 'false'
+outputs:
+  tarball:
+    description: "Absolute path to the packed tarball (the exact bytes ship-package will publish)"
+    value: ${{ steps.pack.outputs.tarball }}
+  integrity:
+    description: "sha512 integrity of the packed tarball"
+    value: ${{ steps.pack.outputs.integrity }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      if: ${{ inputs.checkout == 'true' }}
+      with:
+        ref: ${{ inputs.sha }}
+        fetch-depth: 0
+
+<%= render_step('lang/js/bun/setup') %>
+
+<%= render_step('lang/js/bun/build',
+      entry:  "${{ inputs.entry }}",
+      outdir: "${{ inputs.outdir }}",
+      target: "${{ inputs.target }}",
+      format: "${{ inputs.format }}") %>
+
+<%= render_step('lang/js/bun/pack') %>
+
+<%= render_step('release/lang/js/validate-package') %>
+
+<%= render_step('lang/js/bun/sbom', if: "${{ inputs.sbom == 'true' }}") %>
+
+<%# Attest the packed tarball BEFORE it leaves this job. Skipped on dry runs. -%>
+<%= render_step('release/attest-sbom',
+      if:           "${{ inputs.sbom == 'true' && inputs.dry_run != 'true' }}",
+      subject_path: "${{ steps.pack.outputs.tarball }}",
+      sbom_path:    "${{ inputs.working_directory }}/sbom.json") %>
+
+<%= render_step('release/attest-provenance',
+      if:           "${{ inputs.dry_run != 'true' }}",
+      subject_path: "${{ steps.pack.outputs.tarball }}") %>
+
+<%= render_step('lang/js/env-dump', if: "${{ failure() }}") %>

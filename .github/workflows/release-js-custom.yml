@@ -1,0 +1,266 @@
+#
+# Reference implementation of the v2 JavaScript CUSTOM-BUILD ("build-ownership") shape,
+# using @braintrust/bt-publishing-test (pnpm). This does NOT release a real SDK.
+#
+# The custom shape is the same pipeline as turnkey, cut at the build⟷publish seam into
+# two jobs:
+#   configure → prepare → validate → pack (unprivileged build) → request-approval → [gate] → ship-package
+#
+#   • pack        builds + packs + attests the artifact in a job with NO publish
+#                 credentials, then uploads it.
+#   • ship-package (gated) downloads it, verifies its attestations against its own
+#                 bytes, and publishes THAT exact artifact.
+# Use this shape when the consumer owns a non-standard build; turnkey (release-js.yml)
+# otherwise.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# SETUP (same as release-js.yml, with one addition):
+#   npm Trusted Publishing must list THIS workflow filename (release-js-custom.yml)
+#   + the `publish` environment. Only the ship-package job publishes.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: Release JavaScript custom-build (@braintrust/bt-publishing-test)
+
+on:
+  pull_request:
+    paths:
+      - 'actions/**'
+      - '.github/workflows/**'
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: "Release type — maps to channel + github_release defaults"
+        type: choice
+        default: stable
+        options: [stable, prerelease]
+      channel:
+        description: "Explicit npm channel / dist-tag override (empty → derived from release_type)"
+        type: choice
+        default: latest
+        options: [latest, rc, next, beta]
+      sha:
+        description: "Commit SHA (of the version bump) to release"
+        required: true
+        type: string
+      prev_release:
+        description: "Anchor for release notes: a tag name or commit SHA."
+        type: string
+        required: false
+        default: '58a397193105516446c3042361913655bcece509'
+      dry_run:
+        description: "Dry run: build + pack (no attest, no publish)"
+        type: boolean
+        default: false
+
+jobs:
+  bump:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    outputs:
+      version: ${{ steps.bump.outputs.version }}
+    steps:
+      # bt-publishing-test: derive next version from npm. Real SDKs drop this job.
+      - name: Bump version
+        id: bump
+        run: |
+          CURRENT=$(npm view @braintrust/bt-publishing-test version 2>/dev/null || echo "0.0.0")
+          CURRENT=${CURRENT:-0.0.0}
+          IFS='.' read -r major minor patch <<< "$CURRENT"
+          echo "version=$major.$minor.$((patch + 1))" >> $GITHUB_OUTPUT
+
+  # DERIVE facts (read-only).
+  configure:
+    needs: bump
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.configure.outputs.version }}
+      release_tag: ${{ steps.configure.outputs.release_tag }}
+      prev_release: ${{ steps.configure.outputs.prev_release }}
+      branch: ${{ steps.configure.outputs.branch }}
+      on_release_branch: ${{ steps.configure.outputs.on_release_branch }}
+      commit_message: ${{ steps.configure.outputs.commit_message }}
+      channel: ${{ steps.configure.outputs.channel }}
+      github_release: ${{ steps.configure.outputs.github_release }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Configure release
+        id: configure
+        uses: ./actions/release/lang/js/configure
+        with:
+          version: ${{ needs.bump.outputs.version }}
+          sha: ${{ inputs.sha || github.event.pull_request.head.sha }}
+          working_directory: test/release/js
+          release_type: ${{ inputs.release_type || 'stable' }}
+          channel: ${{ inputs.channel }}
+
+  prepare:
+    needs: configure
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    outputs:
+      pr_list: ${{ steps.prepare.outputs.pr_list }}
+      notes: ${{ steps.prepare.outputs.notes }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Prepare release
+        id: prepare
+        uses: ./actions/release/prepare
+        with:
+          release_tag: ${{ needs.configure.outputs.release_tag }}
+          sha: ${{ inputs.sha || github.event.pull_request.head.sha }}
+          prev_release: ${{ inputs.prev_release || github.event.pull_request.head.sha || needs.configure.outputs.prev_release }}
+
+  # JUDGE (checks only — pack does the build, so build/sbom are off here).
+  validate:
+    needs: [configure, prepare]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Validate release
+        uses: ./actions/release/lang/js/validate
+        with:
+          version: ${{ needs.configure.outputs.version }}
+          sha: ${{ inputs.sha || github.event.pull_request.head.sha }}
+          dry_run: ${{ inputs.dry_run || github.event_name == 'pull_request' }}
+          working_directory: test/release/js
+          node_version: test/release/js/.tool-versions
+          package_name: '@braintrust/bt-publishing-test'
+          release_tag: ${{ needs.configure.outputs.release_tag }}
+          channel: ${{ needs.configure.outputs.channel }}
+          allowed_channels: 'latest,rc,next,beta'
+          on_release_branch: ${{ needs.configure.outputs.on_release_branch }}
+          notes: ${{ needs.prepare.outputs.notes }}
+          build: 'false'   # the pack job owns the build in the custom shape
+          sbom: 'false'    # pack generates + attests the SBOM
+
+  # BUILD side — unprivileged: NO publish credentials. Builds + packs + attests, then uploads.
+  pack:
+    needs: [configure, prepare, validate]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write       # sign attestations
+      attestations: write   # write attestations
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.sha || github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      # bt-publishing-test: write the resolved version into package.json before packing.
+      # Real SDK workflows omit this — the version is committed in the bump PR.
+      - name: Apply version to package.json
+        env:
+          VERSION: ${{ needs.configure.outputs.version }}
+        run: |
+          node -e 'const fs=require("fs");const f="test/release/js/package.json";const p=JSON.parse(fs.readFileSync(f,"utf8"));p.version=process.env.VERSION;fs.writeFileSync(f,JSON.stringify(p,null,2)+"\n")'
+
+      - name: Pack + attest
+        id: pack
+        uses: ./actions/release/lang/js/pack-pnpm
+        with:
+          sha: ${{ inputs.sha || github.event.pull_request.head.sha }}
+          checkout: 'false' # version patch above must survive
+          working_directory: test/release/js
+          node_version: test/release/js/.tool-versions
+          dry_run: ${{ inputs.dry_run || github.event_name == 'pull_request' }}
+
+      # Stage the exact packed tarball + its SBOM for the gated ship job.
+      - name: Stage artifact
+        run: |
+          mkdir -p artifact
+          cp "${{ steps.pack.outputs.tarball }}" artifact/
+          cp test/release/js/sbom.json artifact/ 2>/dev/null || true
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-package
+          path: artifact/
+          retention-days: 1
+          if-no-files-found: error
+
+  # NOTIFY — approval request (green when issued; the real gate is on ship-package).
+  request-approval:
+    needs: [configure, prepare, pack]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Request release approval
+        uses: ./actions/release/request-approval
+        with:
+          sha: ${{ inputs.sha || github.event.pull_request.head.sha }}
+          release_tag: ${{ needs.configure.outputs.release_tag }}
+          prev_release: ${{ needs.configure.outputs.prev_release }}
+          branch: ${{ needs.configure.outputs.branch }}
+          on_release_branch: ${{ needs.configure.outputs.on_release_branch }}
+          commit_message: ${{ needs.configure.outputs.commit_message }}
+          pr_list: ${{ needs.prepare.outputs.pr_list }}
+          notes: ${{ needs.prepare.outputs.notes }}
+          dry_run: ${{ inputs.dry_run || github.event_name == 'pull_request' }}
+          slack_token: ${{ github.event_name != 'pull_request' && secrets.SLACK_BOT_TOKEN || '' }}
+          slack_channel: ${{ github.event_name != 'pull_request' && vars.SLACK_SDK_RELEASE_CHANNEL || '' }}
+          label: '@braintrust/bt-publishing-test'
+          emoji: ':javascript:'
+
+  # PUBLISH side — gated. Downloads the prebuilt artifact, verifies, publishes THAT file.
+  ship-package:
+    needs: [configure, prepare, pack, request-approval]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: >-
+      ${{ github.event_name != 'pull_request'
+          && (inputs.dry_run && 'publish-dry-run' || 'publish')
+          || '' }}
+    permissions:
+      contents: write
+      id-token: write       # OIDC trusted publishing + provenance
+      attestations: read    # gh attestation verify
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-package
+          path: dl
+
+      - name: Resolve tarball
+        id: art
+        run: echo "tarball=$(ls dl/*.tgz)" >> "$GITHUB_OUTPUT"
+
+      - name: Ship package
+        uses: ./actions/release/lang/js/ship-package
+        with:
+          tarball: ${{ steps.art.outputs.tarball }}
+          working_directory: dl   # holds the tarball + sbom.json (attached to the release)
+          sha: ${{ inputs.sha || github.event.pull_request.head.sha }}
+          dry_run: ${{ inputs.dry_run || github.event_name == 'pull_request' }}
+          release_tag: ${{ needs.configure.outputs.release_tag }}
+          # ⚠️ TEST-BED EXCEPTION — do NOT copy. Real consumers wire the derived value:
+          #     github_release: ${{ needs.configure.outputs.github_release }}
+          github_release: 'false'
+          version: ${{ needs.configure.outputs.version }}
+          package_name: '@braintrust/bt-publishing-test'
+          label: '@braintrust/bt-publishing-test'
+          access: 'public'
+          provenance: 'true'
+          channel: ${{ needs.configure.outputs.channel }}
+          notes: ${{ needs.prepare.outputs.notes }}
+          prev_release: ${{ needs.configure.outputs.prev_release }}
+          branch: ${{ needs.configure.outputs.branch }}
+          on_release_branch: ${{ needs.configure.outputs.on_release_branch }}
+          pr_list: ${{ needs.prepare.outputs.pr_list }}
+          slack_token: ${{ github.event_name != 'pull_request' && secrets.SLACK_BOT_TOKEN || '' }}
+          slack_channel: ${{ github.event_name != 'pull_request' && vars.SLACK_SDK_RELEASE_CHANNEL || '' }}
+          emoji: ':javascript:'

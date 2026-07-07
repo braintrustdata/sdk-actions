@@ -125,7 +125,7 @@ runs:
 
 <%= render_step('lang/py/build') %>
 
-<%= render_step('release/lang/py/sbom', if: "${{ inputs.sbom == 'true' }}") %>
+<%= render_step('lang/py/sbom', if: "${{ inputs.sbom == 'true' }}") %>
 
 <%# Attest only the distributions. `uv build` drops a `dist/.gitignore`, and actions/attest's
     glob matches dotfiles (with no brace support), so target the two dist extensions explicitly. -%>
@@ -134,7 +134,7 @@ runs:
       subject_path: ["${{ inputs.working_directory }}/dist/*.whl", "${{ inputs.working_directory }}/dist/*.tar.gz"],
       sbom_path:    "${{ inputs.working_directory }}/sbom.json") %>
 
-<%= render_step('release/lang/py/pypi-publish') %>
+<%= render_step('lang/py/pypi/publish') %>
 
 <%= render_step('release/create-github-release') %>
 

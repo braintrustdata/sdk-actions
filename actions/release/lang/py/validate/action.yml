@@ -53,6 +53,12 @@ inputs:
     description: "Override build command. When empty, `uv build` is used."
     required: false
     default: ''
+  build:
+    description: >
+      Build the distribution as a pre-gate check. Set to 'false' in the custom-build
+      shape, where the pack job owns the build.
+    required: false
+    default: 'true'
   sbom:
     description: >
       Generate a CycloneDX SBOM as a pre-gate check (same generator as build-and-ship),
@@ -198,6 +204,7 @@ runs:
         fi
 
     - name: Build distribution
+      if: ${{ inputs.build == 'true' }}
       shell: bash
       working-directory: ${{ inputs.working_directory }}
       env:

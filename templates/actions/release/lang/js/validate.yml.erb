@@ -107,19 +107,19 @@ runs:
         ref: ${{ inputs.sha }}
         fetch-depth: 0
 
-<%= render_step('lang/js/setup') %>
+<%= render_step('lang/js/pnpm/setup') %>
 
 <%= render_step('lang/js/read-version', version: "${{ inputs.version }}") %>
 
-<%= render_step('release/lang/js/npm-availability', if: "${{ inputs.check_version_unpublished == 'true' }}") %>
+<%= render_step('lang/js/npm/availability', if: "${{ inputs.check_version_unpublished == 'true' }}") %>
 
 <%= render_step('release/lang/js/validate-channel', if: "${{ inputs.check_channel_allowed == 'true' }}") %>
 
 <%= render_step('release/checks') %>
 
-<%= render_step('lang/js/build', if: "${{ inputs.build == 'true' }}") %>
+<%= render_step('lang/js/pnpm/build', if: "${{ inputs.build == 'true' }}") %>
 
 <%# Pre-gate check: confirm SBOM generation works before the approval gate (not signed here). -%>
-<%= render_step('release/lang/js/sbom', if: "${{ inputs.sbom == 'true' }}") %>
+<%= render_step('lang/js/pnpm/sbom', if: "${{ inputs.sbom == 'true' }}") %>
 
 <%= render_step('lang/js/env-dump', if: "${{ failure() }}") %>

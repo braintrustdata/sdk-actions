@@ -109,9 +109,9 @@ runs:
 
 <%# Single build: the pkg/*.gem produced here is the exact file we attest AND push
     (no rebuild), so the attested digest is guaranteed to be the published digest. -%>
-<%= render_step('release/lang/ruby/build') %>
+<%= render_step('lang/ruby/build') %>
 
-<%= render_step('release/lang/ruby/sbom', if: "${{ inputs.sbom == 'true' }}") %>
+<%= render_step('lang/ruby/sbom', if: "${{ inputs.sbom == 'true' }}") %>
 
 <%# Attest the exact gem BEFORE it is pushed, so a failed attestation never leaves a
     published gem unsigned. -%>
@@ -126,7 +126,7 @@ runs:
       if:           "${{ inputs.dry_run != 'true' }}",
       subject_path: "${{ inputs.working_directory }}/pkg/*.gem") %>
 
-<%= render_step('release/lang/ruby/rubygems-push') %>
+<%= render_step('lang/ruby/rubygems/push') %>
 
 <%= render_step('release/create-github-release') %>
 

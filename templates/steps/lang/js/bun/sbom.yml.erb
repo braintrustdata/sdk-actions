@@ -1,0 +1,59 @@
+<%#
+  Generates a CycloneDX SBOM for a BUNDLED Bun artifact from the `bun build` metafile —
+  the module graph of what was actually inlined — so the SBOM matches the shipped
+  bundle rather than a re-resolution of package.json. Maps each bundled node_modules
+  module to its package@version and emits CycloneDX 1.7 (with serialNumber, so
+  actions/attest recognizes it). Bun has no native SBOM, and cyclonedx-npm/cdxgen
+  describe declared deps, not the bundle — hence this metafile-based generator.
+
+  Prerequisite: the build must have run `bun build … --metafile=<metafile>`.
+
+  @param working_directory [String] package root (holds package.json + the metafile). Default: ${{ inputs.working_directory }}
+  @param metafile          [String] bun build metafile path, relative to working_directory. Default: meta.json
+  @param output            [String] SBOM output path, relative to working_directory. Default: sbom.json
+-%>
+- name: Generate SBOM (CycloneDX, from Bun bundle metafile)
+  shell: bash
+  working-directory: <%= locals.fetch(:working_directory) { "${{ inputs.working_directory }}" } %>
+  env:
+    METAFILE: <%= locals.fetch(:metafile) { "meta.json" } %>
+    OUTPUT: <%= locals.fetch(:output) { "sbom.json" } %>
+  run: |
+    # .cjs so it runs as CommonJS even when the package is "type": "module".
+    cat > "$RUNNER_TEMP/bun-sbom.cjs" <<'CJS'
+    const fs = require("fs"), crypto = require("crypto");
+    const meta = JSON.parse(fs.readFileSync(process.env.METAFILE, "utf8"));
+    const root = JSON.parse(fs.readFileSync("package.json", "utf8"));
+    // Collect every node_modules module the bundle actually included. The last
+    // node_modules segment is the installed package (handles nesting + @scope/name).
+    const seen = new Map();
+    for (const out of Object.values(meta.outputs || {})) {
+      for (const input of Object.keys(out.inputs || {})) {
+        const m = input.match(/^(.*node_modules\/(?:@[^/]+\/[^/]+|[^/]+))\//);
+        if (!m || seen.has(m[1])) continue;
+        try {
+          const pj = JSON.parse(fs.readFileSync(m[1] + "/package.json", "utf8"));
+          if (pj.name && pj.version) seen.set(m[1], { name: pj.name, version: pj.version });
+        } catch { /* not a package root; skip */ }
+      }
+    }
+    const purl = (n, v) => `pkg:npm/${n[0] === "@" ? "%40" + n.slice(1) : n}@${v}`;
+    const components = [...seen.values()]
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((c) => ({ type: "library", name: c.name, version: c.version, purl: purl(c.name, c.version) }));
+    const bom = {
+      bomFormat: "CycloneDX",
+      specVersion: "1.7",
+      // Required: actions/attest recognizes CycloneDX only with bomFormat + specVersion + serialNumber.
+      serialNumber: `urn:uuid:${crypto.randomUUID()}`,
+      version: 1,
+      metadata: {
+        tools: { components: [{ type: "application", group: "braintrust", name: "sdk-actions bun sbom" }] },
+        component: { type: "application", name: root.name, version: root.version, purl: purl(root.name, root.version) },
+      },
+      components,
+    };
+    fs.writeFileSync(process.env.OUTPUT, JSON.stringify(bom, null, 2));
+    console.log(`Wrote ${process.env.OUTPUT}: ${components.length} bundled component(s)`);
+    CJS
+    node "$RUNNER_TEMP/bun-sbom.cjs"

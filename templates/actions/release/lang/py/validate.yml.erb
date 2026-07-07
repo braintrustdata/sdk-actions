@@ -52,6 +52,12 @@ inputs:
     description: "Override build command. When empty, `uv build` is used."
     required: false
     default: ''
+  build:
+    description: >
+      Build the distribution as a pre-gate check. Set to 'false' in the custom-build
+      shape, where the pack job owns the build.
+    required: false
+    default: 'true'
   sbom:
     description: >
       Generate a CycloneDX SBOM as a pre-gate check (same generator as build-and-ship),
@@ -88,13 +94,13 @@ runs:
 
 <%= render_step('lang/py/read-version') %>
 
-<%= render_step('release/lang/py/pypi-availability', if: "${{ inputs.check_version_unpublished == 'true' }}") %>
+<%= render_step('lang/py/pypi/availability', if: "${{ inputs.check_version_unpublished == 'true' }}") %>
 
 <%= render_step('release/checks') %>
 
-<%= render_step('lang/py/build') %>
+<%= render_step('lang/py/build', if: "${{ inputs.build == 'true' }}") %>
 
 <%# Pre-gate check: confirm SBOM generation works before the approval gate (not signed here). -%>
-<%= render_step('release/lang/py/sbom', if: "${{ inputs.sbom == 'true' }}") %>
+<%= render_step('lang/py/sbom', if: "${{ inputs.sbom == 'true' }}") %>
 
 <%= render_step('lang/py/env-dump', if: "${{ failure() }}") %>

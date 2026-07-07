@@ -144,15 +144,15 @@ runs:
         ref: ${{ inputs.sha }}
         fetch-depth: 0
 
-<%= render_step('lang/js/setup') %>
+<%= render_step('lang/js/pnpm/setup') %>
 
-<%= render_step('lang/js/build', if: "${{ inputs.build == 'true' }}") %>
+<%= render_step('lang/js/pnpm/build', if: "${{ inputs.build == 'true' }}") %>
 
-<%= render_step('release/lang/js/sbom', if: "${{ inputs.sbom == 'true' }}") %>
+<%= render_step('lang/js/pnpm/sbom', if: "${{ inputs.sbom == 'true' }}") %>
 
-<%= render_step('release/lang/js/attest-sbom', if: "${{ inputs.sbom == 'true' && inputs.dry_run != 'true' }}") %>
+<%= render_step('lang/js/pnpm/attest-sbom', if: "${{ inputs.sbom == 'true' && inputs.dry_run != 'true' }}") %>
 
-<%= render_step('release/lang/js/npm-publish') %>
+<%= render_step('lang/js/npm/publish') %>
 
 <%= render_step('release/create-github-release') %>
 

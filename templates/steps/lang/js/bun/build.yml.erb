@@ -1,0 +1,24 @@
+<%#
+  Builds a Bun project into a bundle and emits a metafile — the module graph of what
+  `bun build` actually inlined — which sbom-bun turns into an SBOM faithful to the
+  shipped bundle. Parametrized by the standard bun build knobs.
+
+  @param entry             [String] build entrypoint. Default: src/index.ts
+  @param outdir            [String] output directory. Default: dist
+  @param target            [String] bun build --target (bun|node|browser). Default: bun
+  @param format            [String] bun build --format (esm|cjs|iife). Default: esm
+  @param metafile          [String] metafile path, relative to working_directory. Default: meta.json
+  @param working_directory [String] package root. Default: ${{ inputs.working_directory }}
+-%>
+- name: Build (bun)
+  shell: bash
+  working-directory: <%= locals.fetch(:working_directory) { "${{ inputs.working_directory }}" } %>
+  env:
+    ENTRY: <%= locals.fetch(:entry) { "src/index.ts" } %>
+    OUTDIR: <%= locals.fetch(:outdir) { "dist" } %>
+    TARGET: <%= locals.fetch(:target) { "bun" } %>
+    FORMAT: <%= locals.fetch(:format) { "esm" } %>
+    METAFILE: <%= locals.fetch(:metafile) { "meta.json" } %>
+  run: |
+    bun build "$ENTRY" --outdir "$OUTDIR" --target "$TARGET" --format "$FORMAT" --metafile="$METAFILE"
+    echo "Built $OUTDIR (metafile: $METAFILE)"

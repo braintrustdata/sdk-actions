@@ -52,6 +52,12 @@ inputs:
     description: "Base64-encoded release notes (from prepare) — checked non-blank"
     required: false
     default: ''
+  build:
+    description: >
+      Build the gem as a pre-gate check. Set to 'false' in the custom-build shape, where
+      the pack job owns the build (lint still runs).
+    required: false
+    default: 'true'
   sbom:
     description: >
       Generate a CycloneDX SBOM as a pre-gate check (same generator as build-and-ship),
@@ -88,7 +94,7 @@ runs:
 
 <%= render_step('lang/ruby/read-version') %>
 
-<%= render_step('release/lang/ruby/rubygems-availability', if: "${{ inputs.check_version_unpublished == 'true' }}") %>
+<%= render_step('lang/ruby/rubygems/availability', if: "${{ inputs.check_version_unpublished == 'true' }}") %>
 
 <%= render_step('release/checks') %>
 
@@ -98,9 +104,9 @@ runs:
       run: bundle exec rake lint
 
 <%# Build the gem (same partial as build-and-ship) to confirm it builds before the gate. -%>
-<%= render_step('release/lang/ruby/build') %>
+<%= render_step('lang/ruby/build', if: "${{ inputs.build == 'true' }}") %>
 
 <%# Pre-gate check: confirm SBOM generation works before the approval gate (not signed here). -%>
-<%= render_step('release/lang/ruby/sbom', if: "${{ inputs.sbom == 'true' }}") %>
+<%= render_step('lang/ruby/sbom', if: "${{ inputs.sbom == 'true' }}") %>
 
 <%= render_step('lang/ruby/env-dump', if: "${{ failure() }}") %>

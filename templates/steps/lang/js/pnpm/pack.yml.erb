@@ -1,0 +1,24 @@
+<%#
+  Packs the built package into the exact tarball that will be published, to a clean
+  directory (a stray .tgz left in the package dir would be packed into the next
+  tarball — spike-observed). `pnpm pack` emits the exact bytes `pnpm publish` uploads
+  (pnpm ≥ 11.8, including workspace: rewriting — spike-verified), so this is the
+  artifact we attest AND the artifact ship-package publishes. Sets id: pack with a
+  `tarball` (absolute path) and `integrity` (sha512) output.
+
+  @param working_directory [String] expr for the package root. Default: ${{ inputs.working_directory }}
+  @param pack_dir          [String] expr for the (clean) output dir. Default: ${{ runner.temp }}/pkgout
+-%>
+- name: Pack
+  id: pack
+  shell: bash
+  working-directory: <%= locals.fetch(:working_directory) { "${{ inputs.working_directory }}" } %>
+  env:
+    PACK_DIR: <%= locals.fetch(:pack_dir) { "${{ runner.temp }}/pkgout" } %>
+  run: |
+    rm -rf "$PACK_DIR"; mkdir -p "$PACK_DIR"
+    pnpm pack --pack-destination "$PACK_DIR" >/dev/null
+    TGZ=$(ls "$PACK_DIR"/*.tgz)
+    echo "tarball=$TGZ" >> "$GITHUB_OUTPUT"
+    echo "integrity=sha512-$(openssl dgst -sha512 -binary "$TGZ" | openssl base64 -A)" >> "$GITHUB_OUTPUT"
+    echo "Packed $TGZ"

@@ -10,9 +10,8 @@
 # the source of any actions/<path>/action.yml, look at templates/actions/<path>.yml(.erb).
 # Edit templates/, never actions/.
 
-require 'erb'
 require 'fileutils'
-require 'json'
+require_relative 'lib/template'
 
 module ActionGenerator
   REPO_ROOT     = File.expand_path('..', __dir__)
@@ -29,57 +28,9 @@ module ActionGenerator
   # removed/renamed, behavior contract changed), minor = additive, patch = fix. Scoped per
   # family so one family's breaking change never forces a major bump on the others.
 
-  # The rendering scope for a template. An instance's `binding` is handed to ERB,
-  # so the ONLY methods a template (.yml.erb) can call are this class's PUBLIC
-  # methods — currently just render_step. Internal helpers stay private.
-  class Template
-    def initialize(source)
-      @source = source
-    end
-
-    # Renders the template. Keyword args are exposed to the template as a
-    # `locals` hash (read with `locals.fetch(:name) { default }`).
-    def render(**locals)
-      ERB.new(@source, trim_mode: '-').result(binding)
-    end
-
-    # Inlines a reusable step (templates/steps/<name>.yml.erb) under a `steps:`
-    # key. The fragment may hold several steps and may compose other steps.
-    # Keyword args reach the step as `locals` (read with locals.fetch(:x) { default }).
-    #
-    # `if:` is the composing action's one control-flow knob. GitHub has no way to
-    # guard a group of steps in a flat composite action, so when `on-failure`
-    # flattens into several sibling steps, the single `if: failure()` written at
-    # the call site is stamped onto EACH of them. Everything else a step
-    # decides — slack configured? dry run? — is a shell self-guard (`exit 0`),
-    # never an `if:`, so there is never a condition to merge. Omit `if:` to run
-    # unconditionally.
-    def render_step(name, indent: 4, **locals)
-      step = Template.new(File.read(File.join(STEPS_DIR, "#{name}.yml.erb"))).render(**locals)
-      step = with_if(step, locals[:if]) if locals.key?(:if)
-      indent_lines(step, indent)
-    end
-
-    private
-
-    # Stamps `if: <condition>` as the first key of every top-level step in a
-    # fragment. Steps carry no `if:` of their own (they self-guard in shell), so
-    # there is nothing to collide with.
-    def with_if(fragment, condition)
-      return fragment if condition.nil? || condition.empty?
-      fragment.split(/^(?=- )/).map do |step|
-        next step unless step.start_with?('- ')
-        head, rest = step.split("\n", 2)
-        keys_indent = head[/^\s*-\s*/].tr('-', ' ')   # align the new key with the step's other keys
-        "#{head}\n#{keys_indent}if: #{condition}\n#{rest}"
-      end.join
-    end
-
-    def indent_lines(text, indent)
-      pad = ' ' * indent
-      text.lines.map { |line| line.strip.empty? ? line : pad + line }.join.rstrip
-    end
-  end
+  # The ERB engine (Template#render / #render_step) lives in scripts/lib/template.rb,
+  # shared with bin/workflow. Actions render through Templating::Template with the
+  # composite-action steps root (STEPS_DIR); see render_action below.
 
   # ── Orchestration (not reachable from templates) ──────────────────────────
   module_function
@@ -109,7 +60,7 @@ module ActionGenerator
   def header_for(template_path)
     family, version = family_version(template_path)
     return GENERATED_HEADER unless version
-    "#{GENERATED_HEADER}# sdk-actions: #{JSON.generate('family' => family, 'version' => version)}\n"
+    GENERATED_HEADER + Templating.metadata_comment('family' => family, 'version' => version)
   end
 
   # Nearest VERSION file walking up from the template toward templates/actions/.
@@ -128,7 +79,7 @@ module ActionGenerator
 
   def render_action(template_path)
     source = File.read(template_path)
-    erb?(template_path) ? Template.new(source).render : source
+    erb?(template_path) ? Templating::Template.new(source, steps_dir: STEPS_DIR).render : source
   end
 
   def erb?(path)

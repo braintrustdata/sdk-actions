@@ -232,8 +232,30 @@ runs:
         SBOM_VENV="$(mktemp -d)/venv"
         uv venv "$SBOM_VENV"
         uv pip install --python "$SBOM_VENV/bin/python" dist/*.whl
+        # NB: do NOT add --output-reproducible — it strips serialNumber (and the timestamp),
+        # and actions/attest requires serialNumber to recognize the SBOM as CycloneDX.
         uvx --from "cyclonedx-bom==7.3.0" cyclonedx-py environment "$SBOM_VENV" \
-          --spec-version 1.7 --output-format JSON --output-file sbom.json
+          --spec-version 1.7 --output-format JSON --output-file sbom.raw.json
+
+        # Promote the built package to the SBOM subject: the env scan leaves it in
+        # `components` with no purl and a local build-path ref. Identify it (the only
+        # component installed from a local file://), set it as metadata.component with a
+        # pkg:pypi purl (normalized: lowercase, '_'->'-'), strip the build-path ref, and
+        # drop it from components. Its bom-ref (and the dependencies-graph root) are kept.
+        jq '
+          def is_local: (.externalReferences // []) | any(.type == "distribution" and ((.url // "") | tostring | startswith("file:")));
+          ([.components[] | select(is_local)] | .[0]) as $subj
+          | if $subj == null then error("SBOM: could not identify the built package component") else . end
+          | ($subj.name | ascii_downcase | gsub("_"; "-")) as $norm
+          | .metadata.component = (
+              $subj
+              | .type = "library"
+              | .purl = "pkg:pypi/\($norm)@\($subj.version)"
+              | .externalReferences = [ (.externalReferences // [])[] | select(((.url // "") | tostring | startswith("file:")) | not) ]
+              | if (.externalReferences | length) == 0 then del(.externalReferences) else . end )
+          | .components = [ .components[] | select(.["bom-ref"] != $subj["bom-ref"]) ]
+        ' sbom.raw.json > sbom.json
+        rm -f sbom.raw.json
         echo "Wrote $(pwd)/sbom.json"
 
     - name: Dump Python environment

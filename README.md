@@ -23,11 +23,11 @@ These actions can be used in combination to bootstrap quickly or individually to
 2. **Copy the canonical template** for your language + shape into your repo's
    `.github/workflows/`:
 
-   | Language | Turnkey | Custom build |
-   |---|---|---|
-   | JavaScript | [`release-js.yml`](.github/workflows/release-js.yml) | [`release-js-custom.yml`](.github/workflows/release-js-custom.yml) |
-   | Python | [`release-py.yml`](.github/workflows/release-py.yml) | [`release-py-custom.yml`](.github/workflows/release-py-custom.yml) |
-   | Ruby | [`release-ruby.yml`](.github/workflows/release-ruby.yml) | [`release-ruby-custom.yml`](.github/workflows/release-ruby-custom.yml) |
+   | Language   | Turnkey                                                  | Custom build                                                           |
+   | ---------- | -------------------------------------------------------- | ---------------------------------------------------------------------- |
+   | JavaScript | [`release-js.yml`](.github/workflows/release-js.yml)     | [`release-js-custom.yml`](.github/workflows/release-js-custom.yml)     |
+   | Python     | [`release-py.yml`](.github/workflows/release-py.yml)     | [`release-py-custom.yml`](.github/workflows/release-py-custom.yml)     |
+   | Ruby       | [`release-ruby.yml`](.github/workflows/release-ruby.yml) | [`release-ruby-custom.yml`](.github/workflows/release-ruby-custom.yml) |
 
 3. **Configure an OIDC trusted publisher** on your registry (npm / PyPI / RubyGems) for this repo + workflow filename (and environment, if gated) — publishing and attestation use it, no long-lived tokens.
 4. **Adapt the template to your package.** The template demonstrates an actual package deploy and includes glue to make that function: other applications will want to remove that glue, so review the whole file before adapting. The comments flag what typically changes (version source, package/gem name, working directory), but they aren't exhaustive.
@@ -94,19 +94,19 @@ the template, but they're listed here as a reference for customizing it — each
 **self-contained** (calls no other action in this repo), so a single SHA pin
 pulls in everything it needs.
 
-| Action | Purpose |
-|---|---|
-| `release/lang/<lang>/configure` | Derive release facts (tag, channel, rc suffix, `github_release`) from the version + `release_type` — read-only |
-| `release/prepare` | Fetch the PR list and release notes |
-| `release/lang/<lang>/validate` | Validate the release (tag / channel / branch / metadata, registry availability) and run a pre-gate build + SBOM generation |
-| `release/request-approval` | Post the pre-approval job summary and Slack notification |
-| `release/lang/<lang>/build-and-ship` | **Turnkey**: build → sign a CycloneDX SBOM (+ build provenance for Ruby) → publish (OIDC trusted publishing) → create the GitHub release (SBOM attached) → notify |
-| `release/lang/js/pack-pnpm` · `pack-bun`, `release/lang/{py,ruby}/pack` | **Custom build**: build + pack + sign SBOM + build provenance in an unprivileged job (no publish credentials) |
-| `release/lang/<lang>/ship-package` | **Custom build**: verify the attestation against the downloaded artifact → publish that exact artifact → create the GitHub release → notify |
-| `release/lang/js/publish-tarballs` | Verify prebuilt npm tarballs by glob and publish the exact bytes to npmjs in manifest order |
-| `release/create-package-releases` | Create per-package GitHub releases from existing manifest tags, titles, and bodies |
-| `release/verify-package` | Verify downloaded artifact attestations without using a language-specific ship action |
-| `release/upload-package-sboms` | Attach package SBOM assets by manifest and glob; missing SBOMs warn without failing |
+| Action                                                                  | Purpose                                                                                                                                                           |
+| ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `release/lang/<lang>/configure`                                         | Derive release facts (tag, channel, rc suffix, `github_release`) from the version + `release_type` — read-only                                                    |
+| `release/prepare`                                                       | Fetch the PR list and release notes                                                                                                                               |
+| `release/lang/<lang>/validate`                                          | Validate the release (tag / channel / branch / metadata, registry availability) and run a pre-gate build + SBOM generation                                        |
+| `release/request-approval`                                              | Post the pre-approval job summary and Slack notification                                                                                                          |
+| `release/lang/<lang>/build-and-ship`                                    | **Turnkey**: build → sign a CycloneDX SBOM (+ build provenance for Ruby) → publish (OIDC trusted publishing) → create the GitHub release (SBOM attached) → notify |
+| `release/lang/js/pack-pnpm` · `pack-bun`, `release/lang/{py,ruby}/pack` | **Custom build**: build + pack + sign SBOM + build provenance in an unprivileged job (no publish credentials)                                                     |
+| `release/lang/<lang>/ship-package`                                      | **Custom build**: verify the attestation against the downloaded artifact → publish that exact artifact → create the GitHub release → notify                       |
+| `release/lang/js/publish-tarballs`                                      | Verify prebuilt npm tarballs by glob and publish the exact bytes to npmjs in manifest order                                                                       |
+| `release/create-package-releases`                                       | Create per-package GitHub releases from existing manifest tags, titles, and bodies                                                                                |
+| `release/verify-package`                                                | Verify downloaded artifact attestations without using a language-specific ship action                                                                             |
+| `release/upload-package-sboms`                                          | Attach package SBOM assets by manifest and glob; missing SBOMs warn without failing                                                                               |
 
 Inputs and outputs are documented in each `action.yml`. Reference an action by
 commit SHA:

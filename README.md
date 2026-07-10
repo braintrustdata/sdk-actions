@@ -46,6 +46,47 @@ Actions are pinned by commit SHA. Bump the SHA to pick up changes. To judge whet
 
 These actions follow semantic versioning: expect breaking changes when the major version updates.
 
+### Manifest-driven JavaScript tarball releases
+
+For monorepos that own their own build and package selection, create a manifest
+plus prebuilt npm tarballs and SBOMs in the source repository, attest those
+artifacts before upload, then call `release/lang/js/publish-tarballs` from the
+gated publish job. The action verifies the downloaded tarball attestations,
+then publishes the exact tarballs to npmjs in manifest order. After the source
+repository pushes its package tags, call `release/create-package-releases`, then
+`release/upload-package-sboms`.
+
+The manifest passed between build and publish jobs is JSON in this shape:
+
+```json
+{
+  "commit": "0123456789abcdef0123456789abcdef01234567",
+  "packages": [
+    {
+      "name": "@scope/package",
+      "version": "1.2.3",
+      "dir": "packages/package",
+      "tag": "@scope/package@1.2.3",
+      "tarball_asset": "scope-package-1.2.3.tgz",
+      "sbom_asset": "scope-package-1.2.3.sbom.json",
+      "release_title": "@scope/package@1.2.3",
+      "release_body": "Markdown release notes",
+      "channel": "latest",
+      "provenance": true
+    }
+  ]
+}
+```
+
+`name` and `version` are required. `packages` must already be in publish order.
+`dir` and `commit` are source-repository metadata, useful while building and
+tagging. `tarball_asset` and `sbom_asset` identify the downloaded artifact
+basenames; when omitted, actions derive them from `name` and `version`. `tag`
+defaults to `name@version`; `release_title` defaults to `tag`; and
+`release_body` defaults to a short publish message. `channel` and `provenance`
+may override the `publish-tarballs` defaults per package. JavaScript SBOM
+generation commonly uses `pnpm sbom`, which requires pnpm `>= 11.8`.
+
 ### Available release actions
 
 The release workflow is composed from these actions. You normally get them via
@@ -62,6 +103,10 @@ pulls in everything it needs.
 | `release/lang/<lang>/build-and-ship` | **Turnkey**: build → sign a CycloneDX SBOM (+ build provenance for Ruby) → publish (OIDC trusted publishing) → create the GitHub release (SBOM attached) → notify |
 | `release/lang/js/pack-pnpm` · `pack-bun`, `release/lang/{py,ruby}/pack` | **Custom build**: build + pack + sign SBOM + build provenance in an unprivileged job (no publish credentials) |
 | `release/lang/<lang>/ship-package` | **Custom build**: verify the attestation against the downloaded artifact → publish that exact artifact → create the GitHub release → notify |
+| `release/lang/js/publish-tarballs` | Verify prebuilt npm tarballs by glob and publish the exact bytes to npmjs in manifest order |
+| `release/create-package-releases` | Create per-package GitHub releases from existing manifest tags, titles, and bodies |
+| `release/verify-package` | Verify downloaded artifact attestations without using a language-specific ship action |
+| `release/upload-package-sboms` | Attach package SBOM assets by manifest and glob; missing SBOMs warn without failing |
 
 Inputs and outputs are documented in each `action.yml`. Reference an action by
 commit SHA:

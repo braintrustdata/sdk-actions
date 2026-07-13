@@ -1,0 +1,103 @@
+name: Ship Ruby Package (custom build)
+description: >
+  Custom-build gated publish side: verifies the downloaded gem's attestations against
+  its own bytes, pushes that exact gem to RubyGems (OIDC trusted publishing), creates a
+  GitHub release (attaching the SBOM), and announces. No build, no attest — it ships a
+  prebuilt, attested gem. Requires id-token: write + contents: write. The workflow
+  downloads the gem + sbom.json into working_directory first.
+
+inputs:
+  working_directory:
+    description: "Directory holding the downloaded gem + sbom.json"
+    required: false
+    default: '.'
+  sha:
+    description: "Commit SHA being released (release target)"
+    required: true
+  dry_run:
+    description: "Skip verification, gem push, tag push, and GitHub release creation"
+    required: false
+    default: 'false'
+  release_tag:
+    description: "The release tag (e.g. v0.3.2)"
+    required: true
+  github_release:
+    description: "Whether to create a GitHub release"
+    required: false
+    default: 'true'
+  release_title:
+    description: "GitHub release name/title. Defaults to the release tag when empty."
+    required: false
+    default: ''
+  sbom:
+    description: "Attach the downloaded sbom.json to the GitHub release"
+    required: false
+    default: 'true'
+  gem_name:
+    description: "RubyGems gem name — used to build the RubyGems link in notifications"
+    required: false
+    default: ''
+  label:
+    description: "Display name for release notifications (e.g. the gem name)."
+    required: false
+    default: ''
+  notes:
+    description: "Base64-encoded release notes from the prepare action"
+    required: false
+    default: ''
+  prev_release:
+    description: "Previous release tag — used in completion notification"
+    required: false
+    default: ''
+  branch:
+    description: "Branch the release was made from"
+    required: true
+  on_release_branch:
+    description: "Whether the SHA is on an expected release branch"
+    required: true
+  pr_list:
+    description: "x1f-delimited PR list from prepare action"
+    required: false
+    default: ''
+  slack_token:
+    description: "Slack bot token"
+    required: false
+    default: ''
+  slack_channel:
+    description: "Slack channel ID"
+    required: false
+    default: ''
+  slack_mention:
+    description: "Optional Slack handle or group to @mention on completion"
+    required: false
+    default: ''
+  failure_slack_mention:
+    description: "Optional Slack handle or group to @mention if the publish fails"
+    required: false
+    default: ''
+  emoji:
+    description: "Emoji prefix for Slack messages"
+    required: false
+    default: ':ruby:'
+
+runs:
+  using: composite
+  steps:
+    # Set up a default Ruby so `gem push` has a modern rubygems (OIDC trusted publishing);
+    # no bundle install — this job doesn't build.
+    - name: Set up Ruby
+      uses: ruby/setup-ruby@afeafc3d1ab54a631816aba4c914a0081c12ff2f # v1.310.0
+      with:
+        ruby-version: '3.3'
+
+<%= render_step('release/verify-package',
+      if:        "${{ inputs.dry_run != 'true' }}",
+      artifacts: "${{ inputs.working_directory }}/*.gem") %>
+
+<%= render_step('lang/ruby/rubygems/push', gem: "*.gem") %>
+
+<%= render_step('release/create-github-release') %>
+
+<%= render_step('release/lang/ruby/notify-published') %>
+
+<%= render_step('release/lang/ruby/on-failure', if: "${{ failure() }}") %>

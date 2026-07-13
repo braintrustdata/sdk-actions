@@ -1,0 +1,74 @@
+<%#
+  Derives release FACTS (no judging): the release tag, the branch containing the SHA
+  and whether it's a release branch, the commit message, the previous release tag, and
+  the channel + github_release defaults mapped from release_type (explicit overrides
+  win). Read-only — the "derive" half of the old release/validate step; the checks that
+  can fail on state moved to release/checks. Assumes the repo is checked out at the
+  target SHA and the version is resolved (read-version, id: read-version). Writes its
+  outputs on the `configure` step.
+
+  @param version        [String] expr for the version.                    Default: ${{ steps.read-version.outputs.version }}
+  @param sha            [String] expr for the commit SHA.                  Default: ${{ inputs.sha }}
+  @param tag_format     [String] git tag format, {version} placeholder.    Default: v{version}
+  @param release_branch [String] comma-separated branch/glob patterns.     Default: main
+  @param release_type   [String] 'stable' | 'prerelease' — channel/github_release defaults. Default: ${{ inputs.release_type }}
+  @param channel        [String] explicit channel override (wins over release_type).        Default: ${{ inputs.channel }}
+  @param github_release [String] explicit github_release override (wins over release_type). Default: ${{ inputs.github_release }}
+-%>
+- name: Validate SHA format
+  shell: bash
+  env:
+    SHA: <%= locals.fetch(:sha) { "${{ inputs.sha }}" } %>
+  run: |
+    if ! echo "$SHA" | grep -qE '^[0-9a-f]{40}$'; then
+      echo "::error title=Invalid release SHA::sha must be a full 40-character commit SHA — branch names and short SHAs are not accepted."
+      exit 1
+    fi
+
+- name: Configure release
+  id: configure
+  shell: bash
+  env:
+    VERSION: <%= locals.fetch(:version) { "${{ steps.read-version.outputs.version }}" } %>
+    TAG_FORMAT: <%= locals.fetch(:tag_format) { "${{ inputs.tag_format }}" } %>
+    RELEASE_BRANCH: <%= locals.fetch(:release_branch) { "${{ inputs.release_branch }}" } %>
+    RELEASE_TYPE: <%= locals.fetch(:release_type) { "${{ inputs.release_type }}" } %>
+    # Quoted: these overrides are legitimately empty (e.g. py/ruby have no channel), and an
+    # unquoted empty value would parse as YAML null, which the action schema rejects.
+    CHANNEL_OVERRIDE: "<%= locals.fetch(:channel) { "${{ inputs.channel }}" } %>"
+    GHR_OVERRIDE: "<%= locals.fetch(:github_release) { "${{ inputs.github_release }}" } %>"
+  run: |
+    TAG="${TAG_FORMAT//\{version\}/$VERSION}"
+    COMMIT_MSG=$(git log -1 --format="%s" HEAD)
+    BRANCH=$(git branch -r --contains HEAD --format="%(refname:short)" | sed 's|origin/||' | head -1)
+
+    ON_RELEASE_BRANCH=false
+    IFS=',' read -ra PATTERNS <<< "$RELEASE_BRANCH"
+    for pattern in "${PATTERNS[@]}"; do
+      pattern=$(echo "$pattern" | xargs)
+      if [[ "$BRANCH" == $pattern ]]; then ON_RELEASE_BRANCH=true; break; fi
+    done
+
+    PREV_RELEASE_PATTERN="${TAG_FORMAT//\{version\}/[0-9]*.[0-9]*.[0-9]*}"
+    PREV_RELEASE=$(git describe --tags --abbrev=0 --match="$PREV_RELEASE_PATTERN" HEAD^ 2>/dev/null || echo "")
+
+    # channel: explicit override wins; else map from release_type (prerelease→rc, stable→latest)
+    if [ -n "$CHANNEL_OVERRIDE" ]; then CHANNEL="$CHANNEL_OVERRIDE"
+    elif [ "$RELEASE_TYPE" = "prerelease" ]; then CHANNEL="rc"
+    else CHANNEL="latest"; fi
+
+    # github_release: explicit override wins; else prerelease→false, stable→true
+    if [ -n "$GHR_OVERRIDE" ]; then GHR="$GHR_OVERRIDE"
+    elif [ "$RELEASE_TYPE" = "prerelease" ]; then GHR="false"
+    else GHR="true"; fi
+
+    {
+      echo "release_tag=$TAG"
+      echo "commit_message=$COMMIT_MSG"
+      echo "branch=$BRANCH"
+      echo "on_release_branch=$ON_RELEASE_BRANCH"
+      echo "prev_release=$PREV_RELEASE"
+      echo "channel=$CHANNEL"
+      echo "github_release=$GHR"
+    } >> "$GITHUB_OUTPUT"
+    echo "Configured $TAG @ $VERSION (channel=$CHANNEL, github_release=$GHR, branch=$BRANCH, on_release_branch=$ON_RELEASE_BRANCH)"

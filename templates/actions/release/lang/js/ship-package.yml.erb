@@ -1,0 +1,137 @@
+name: Ship JavaScript Package (custom build)
+description: >
+  Publish side of the custom-build ("build-ownership") path — runs in the GATED job.
+  Verifies the downloaded artifact's attestations (SLSA build provenance + CycloneDX
+  SBOM) against its own bytes, then publishes THAT exact tarball to npm (OIDC trusted
+  publishing + provenance), creates a GitHub release (attaching the SBOM), and
+  announces on Slack. No build, no attest — it ships a prebuilt, attested artifact.
+  Tamper-evident: any change to the tarball in transit fails verification and blocks
+  the publish. Requires id-token: write + contents: write. The workflow downloads the
+  artifact (tarball + sbom.json) into working_directory before calling this action.
+
+inputs:
+  tarball:
+    description: "Path to the downloaded tarball to verify + publish (the exact bytes pack attested)"
+    required: true
+  working_directory:
+    description: "Directory holding the downloaded tarball + sbom.json (used to attach the SBOM to the release)"
+    required: false
+    default: '.'
+  sha:
+    description: "Commit SHA being released (release target)"
+    required: true
+  npm:
+    description: "Whether to publish to the npm registry"
+    required: false
+    default: 'true'
+  registry:
+    description: "npm registry URL"
+    required: false
+    default: 'https://registry.npmjs.org'
+  access:
+    description: "npm publish access: public | restricted (provenance requires public)"
+    required: false
+    default: 'public'
+  provenance:
+    description: "Publish with npm-native provenance (requires a public package)"
+    required: false
+    default: 'true'
+  channel:
+    description: "npm release channel (dist-tag) to publish under"
+    required: false
+    default: 'latest'
+  dry_run:
+    description: "Skip verification, npm publish, tag push, and GitHub release creation"
+    required: false
+    default: 'false'
+  release_tag:
+    description: "The release tag (e.g. v0.3.2)"
+    required: true
+  github_release:
+    description: "Whether to create a GitHub release"
+    required: false
+    default: 'true'
+  release_title:
+    description: "GitHub release name/title. Defaults to the release tag when empty."
+    required: false
+    default: ''
+  sbom:
+    description: "Attach the downloaded sbom.json to the GitHub release"
+    required: false
+    default: 'true'
+  version:
+    description: "The package version — used to build the npm link in notifications"
+    required: false
+    default: ''
+  package_name:
+    description: "npm package name — used to build the npm link in notifications"
+    required: false
+    default: ''
+  label:
+    description: "Display name for release notifications (e.g. the package name)."
+    required: false
+    default: ''
+  notes:
+    description: "Base64-encoded release notes from the prepare action"
+    required: false
+    default: ''
+  prev_release:
+    description: "Previous release tag — used in completion notification"
+    required: false
+    default: ''
+  branch:
+    description: "Branch the release was made from"
+    required: true
+  on_release_branch:
+    description: "Whether the SHA is on an expected release branch"
+    required: true
+  pr_list:
+    description: "x1f-delimited PR list from prepare action"
+    required: false
+    default: ''
+  slack_token:
+    description: "Slack bot token"
+    required: false
+    default: ''
+  slack_channel:
+    description: "Slack channel ID"
+    required: false
+    default: ''
+  slack_mention:
+    description: "Optional Slack handle or group to @mention on completion"
+    required: false
+    default: ''
+  failure_slack_mention:
+    description: "Optional Slack handle or group to @mention if the publish fails"
+    required: false
+    default: ''
+  emoji:
+    description: "Emoji prefix for Slack messages"
+    required: false
+    default: ':package:'
+
+runs:
+  using: composite
+  steps:
+<%# Verify the attestations against the downloaded bytes BEFORE publishing (tamper-evident).
+    Skipped on dry runs, where pack didn't attest. -%>
+<%= render_step('release/verify-package',
+      if:        "${{ inputs.dry_run != 'true' }}",
+      artifacts: "${{ inputs.tarball }}") %>
+
+    # Publishing a prebuilt tarball goes through the npm CLI, so this needs Node with a
+    # user-writable global prefix (to install a modern npm for OIDC) and the registry
+    # wired for trusted publishing — but no pnpm and no dependency install.
+    - name: Set up Node
+      uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      with:
+        node-version: 'lts/*'
+        registry-url: ${{ inputs.registry }}
+
+<%= render_step('lang/js/npm/publish-package', tarball: "${{ inputs.tarball }}") %>
+
+<%= render_step('release/create-github-release') %>
+
+<%= render_step('release/lang/js/notify-published') %>
+
+<%= render_step('release/lang/js/on-failure', if: "${{ failure() }}") %>

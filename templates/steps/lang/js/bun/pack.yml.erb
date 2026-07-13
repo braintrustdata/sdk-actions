@@ -1,0 +1,22 @@
+<%#
+  Packs the Bun package into the exact npm tarball via `bun pm pack`, to a clean
+  directory. Sets id: pack with `tarball` (absolute path) + `integrity` (sha512) —
+  matching lang/js/pack-pnpm, so the composing action treats both toolchains
+  identically (validate/attest/ship steps are shared).
+
+  @param working_directory [String] package root. Default: ${{ inputs.working_directory }}
+  @param pack_dir          [String] clean output dir. Default: ${{ runner.temp }}/pkgout
+-%>
+- name: Pack (bun pm pack)
+  id: pack
+  shell: bash
+  working-directory: <%= locals.fetch(:working_directory) { "${{ inputs.working_directory }}" } %>
+  env:
+    PACK_DIR: <%= locals.fetch(:pack_dir) { "${{ runner.temp }}/pkgout" } %>
+  run: |
+    rm -rf "$PACK_DIR"; mkdir -p "$PACK_DIR"
+    bun pm pack --destination "$PACK_DIR" >/dev/null
+    TGZ=$(ls "$PACK_DIR"/*.tgz)
+    echo "tarball=$TGZ" >> "$GITHUB_OUTPUT"
+    echo "integrity=sha512-$(openssl dgst -sha512 -binary "$TGZ" | openssl base64 -A)" >> "$GITHUB_OUTPUT"
+    echo "Packed $TGZ"

@@ -1,0 +1,68 @@
+name: Pack Python Package (custom build)
+description: >
+  Custom-build side (unprivileged — no publish credentials): checks out the SHA, builds
+  the sdist + wheel, generates a CycloneDX SBOM, and attests the SBOM + SLSA build
+  provenance to those dists. The workflow uploads dist/* + sbom.json for the gated
+  ship-package job. Requires id-token: write + attestations: write.
+
+  Note: unlike turnkey py (which relies on PyPI's native PEP 740 provenance), the custom
+  path also emits our own build provenance — ship-package verifies it against the
+  downloaded dists before publishing.
+
+inputs:
+  sha:
+    description: "Commit SHA to check out and pack"
+    required: true
+  checkout:
+    description: "Check out the SHA before building. Set to false when the caller already checked out."
+    required: false
+    default: 'true'
+  working_directory:
+    description: "Path to the package root (where pyproject.toml lives)"
+    required: false
+    default: '.'
+  python_version:
+    description: >
+      Python version (e.g. 3.13), or a path to a version file
+      (.python-version, .tool-versions) relative to the repo root.
+    required: true
+  build_command:
+    description: "Override build command. When empty, `uv build` is used."
+    required: false
+    default: ''
+  sbom:
+    description: "Generate + attest a CycloneDX SBOM bound to the dists. Requires attestations: write."
+    required: false
+    default: 'true'
+  dry_run:
+    description: "Skip attestation (nothing is uploaded to the transparency log on a dry run)"
+    required: false
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      if: ${{ inputs.checkout == 'true' }}
+      with:
+        ref: ${{ inputs.sha }}
+        fetch-depth: 0
+
+<%= render_step('lang/py/setup') %>
+
+<%= render_step('lang/py/build') %>
+
+<%= render_step('lang/py/sbom', if: "${{ inputs.sbom == 'true' }}") %>
+
+<%# uv build drops a dist/.gitignore, and actions/attest's glob matches dotfiles with no
+    brace support, so target the two dist extensions explicitly. -%>
+<%= render_step('release/attest-sbom',
+      if:           "${{ inputs.sbom == 'true' && inputs.dry_run != 'true' }}",
+      subject_path: ["${{ inputs.working_directory }}/dist/*.whl", "${{ inputs.working_directory }}/dist/*.tar.gz"],
+      sbom_path:    "${{ inputs.working_directory }}/sbom.json") %>
+
+<%= render_step('release/attest-provenance',
+      if:           "${{ inputs.dry_run != 'true' }}",
+      subject_path: ["${{ inputs.working_directory }}/dist/*.whl", "${{ inputs.working_directory }}/dist/*.tar.gz"]) %>
+
+<%= render_step('lang/py/env-dump', if: "${{ failure() }}") %>

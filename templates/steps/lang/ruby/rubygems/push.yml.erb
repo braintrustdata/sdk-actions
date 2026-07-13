@@ -1,11 +1,11 @@
 <%#
-  Publishes the PRE-BUILT gem to RubyGems via OIDC trusted publishing — pushing the
-  exact gem built (and attested) earlier, with NO rebuild, so the attested digest is
-  the published digest. Uses rubygems/configure-rubygems-credentials (the official
-  RubyGems OIDC action, the same one rubygems/release-gem uses internally) to obtain
-  a short-lived trusted-publishing token, then `gem push`. On a dry run, skips both
-  credential setup and the push. Requires id-token: write and a RubyGems trusted
-  publisher configured for this gem (repo + workflow, and environment if gated).
+  Pushes a pre-built gem to RubyGems via OIDC trusted publishing (no token) — the exact
+  file, no rebuild, so attested digest == published digest. Skipped on dry runs.
+  Requires id-token: write + a RubyGems trusted publisher (repo + workflow, and
+  environment if gated). Shared by turnkey build-and-ship and custom ship-package; only
+  the gem's location differs.
+
+  @param gem [String] gem glob, relative to working_directory. Default: pkg/*.gem
 -%>
 - name: Configure RubyGems credentials (OIDC trusted publishing)
   if: ${{ inputs.dry_run != 'true' }}
@@ -14,9 +14,14 @@
   shell: bash
   working-directory: ${{ inputs.working_directory }}
   env:
+    GEM_GLOB: "<%= locals.fetch(:gem) { "pkg/*.gem" } %>"
     DRY_RUN: ${{ inputs.dry_run }}
   run: |
-    GEM=$(ls pkg/*.gem)
+    GEM=$(ls $GEM_GLOB 2>/dev/null | head -1)
+    if [ -z "$GEM" ]; then
+      echo "::error title=Gem not found::no gem matched '$GEM_GLOB' in $(pwd)."
+      exit 1
+    fi
     if [ "$DRY_RUN" = "true" ]; then
       echo "DRY RUN: would gem push $GEM"
       exit 0

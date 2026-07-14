@@ -53,8 +53,8 @@ plus prebuilt npm tarballs and SBOMs in the source repository, attest those
 artifacts before upload, then call `release/lang/js/publish-tarballs` from the
 gated publish job. The action verifies the downloaded tarball attestations,
 then publishes the exact tarballs to npmjs in manifest order. After the source
-repository pushes its package tags, call `release/create-package-releases`, then
-`release/upload-package-sboms`.
+repository pushes its package tags, call `release/create-package-releases` with
+`sboms` to attach the per-package SBOM assets.
 
 The manifest passed between build and publish jobs is JSON in this shape:
 
@@ -104,9 +104,8 @@ pulls in everything it needs.
 | `release/lang/js/pack-pnpm` · `pack-bun`, `release/lang/{py,ruby}/pack` | **Custom build**: build + pack + sign SBOM + build provenance in an unprivileged job (no publish credentials)                                                     |
 | `release/lang/<lang>/ship-package`                                      | **Custom build**: verify the attestation against the downloaded artifact → publish that exact artifact → create the GitHub release → notify                       |
 | `release/lang/js/publish-tarballs`                                      | Verify prebuilt npm tarballs by glob and publish the exact bytes to npmjs in manifest order                                                                       |
-| `release/create-package-releases`                                       | Create per-package GitHub releases from existing manifest tags, titles, and bodies                                                                                |
+| `release/create-package-releases`                                       | Create per-package GitHub releases from existing manifest tags, titles, and bodies, with optional per-package SBOM assets                                         |
 | `release/verify-package`                                                | Verify downloaded artifact attestations without using a language-specific ship action                                                                             |
-| `release/upload-package-sboms`                                          | Attach package SBOM assets by manifest and glob; missing SBOMs warn without failing                                                                               |
 
 Inputs and outputs are documented in each `action.yml`. Reference an action by
 commit SHA:

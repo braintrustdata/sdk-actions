@@ -2,8 +2,9 @@
 # sdk-actions: {"family":"release","version":"1.0.0"}
 name: Create Package GitHub Releases
 description: >
-  Create one GitHub release per package in a release manifest. Release tags must
-  already exist in the repository; this action never creates or moves tags.
+  Create one GitHub release per package in a release manifest and optionally
+  attach each package's SBOM asset. Release tags must already exist in the
+  repository; this action never creates or moves tags.
 
 # Manifest contract:
 # {
@@ -12,6 +13,7 @@ description: >
 #       "name": "@scope/package",
 #       "version": "1.2.3",
 #       "tag": "@scope/package@1.2.3",
+#       "sbom_asset": "scope-package-1.2.3.sbom.json",
 #       "release_title": "@scope/package@1.2.3",
 #       "release_body": "Markdown notes"
 #     }
@@ -21,6 +23,8 @@ description: >
 # Required: name, version.
 # Optional: tag defaults to <name>@<version>; release_title defaults to tag;
 # release_body defaults to "Published <name>@<version>.".
+# Optional: sbom_asset defaults to a basename derived from name and version:
+# leading @ is removed, / becomes -, then -<version>.sbom.json is appended.
 
 inputs:
   manifest:
@@ -30,8 +34,16 @@ inputs:
     description: "GitHub owner/repo containing the existing package tags"
     required: false
     default: '${{ github.repository }}'
+  sboms:
+    description: "Space-separated SBOM paths or globs to attach to package releases; leave empty to skip"
+    required: false
+    default: ''
+  clobber:
+    description: "Overwrite an existing SBOM release asset with the same name"
+    required: false
+    default: 'true'
   dry_run:
-    description: "Print releases without modifying GitHub"
+    description: "Print releases and SBOM uploads without modifying GitHub"
     required: false
     default: 'false'
 
@@ -44,6 +56,8 @@ runs:
         GH_TOKEN: ${{ github.token }}
         MANIFEST: ${{ inputs.manifest }}
         REPO: ${{ inputs.repo }}
+        SBOMS: ${{ inputs.sboms }}
+        CLOBBER: ${{ inputs.clobber }}
         DRY_RUN: ${{ inputs.dry_run }}
       run: |
         set -euo pipefail
@@ -53,9 +67,28 @@ runs:
           exit 1
         fi
 
+        if [ "$DRY_RUN" != "true" ] && ! command -v gh >/dev/null 2>&1; then
+          echo "::error title=GitHub CLI not found::create-package-releases requires gh to create releases and upload SBOM assets."
+          exit 1
+        fi
+
         if [ ! -f "$MANIFEST" ]; then
           echo "::error title=Manifest not found::release manifest does not exist: $MANIFEST"
           exit 1
+        fi
+
+        shopt -s nullglob
+        sbom_files=()
+        if [ -n "$SBOMS" ]; then
+          sbom_files=( $SBOMS )
+          if [ "${#sbom_files[@]}" -eq 0 ]; then
+            echo "::warning title=No SBOMs found::no files matched '$SBOMS'."
+          fi
+        fi
+
+        clobber_args=()
+        if [ "$CLOBBER" = "true" ]; then
+          clobber_args+=(--clobber)
         fi
 
         while IFS= read -r encoded; do
@@ -63,6 +96,7 @@ runs:
           name="$(jq -r '.name' <<< "$package_json")"
           version="$(jq -r '.version' <<< "$package_json")"
           tag="$(jq -r '.tag // "\(.name)@\(.version)"' <<< "$package_json")"
+          sbom_asset="$(jq -r '.sbom_asset // .sbom // empty' <<< "$package_json")"
           title="$(jq -r '.release_title // .tag // "\(.name)@\(.version)"' <<< "$package_json")"
           notes_file="$(mktemp)"
           jq -r '.release_body // "Published \(.name)@\(.version)."' <<< "$package_json" > "$notes_file"
@@ -78,6 +112,33 @@ runs:
               --notes-file "$notes_file" \
               --verify-tag
             echo "Created GitHub release for $tag"
+          fi
+
+          if [ "${#sbom_files[@]}" -gt 0 ]; then
+            artifact_base="${name#@}"
+            artifact_base="${artifact_base//\//-}"
+            artifact_base="${artifact_base//@/-}"
+            expected="${sbom_asset:-$artifact_base-$version.sbom.json}"
+            matched=()
+
+            for file in "${sbom_files[@]}"; do
+              if [ "$(basename "$file")" = "$expected" ]; then
+                matched+=("$file")
+              fi
+            done
+
+            if [ "${#matched[@]}" -eq 0 ]; then
+              echo "::warning title=Package SBOM missing::no SBOM named $expected found for $name@$version."
+            else
+              for file in "${matched[@]}"; do
+                if [ "$DRY_RUN" = "true" ]; then
+                  echo "DRY RUN: would upload $file to $tag in $REPO"
+                else
+                  gh release upload "$tag" "$file" --repo "$REPO" "${clobber_args[@]}"
+                  echo "Uploaded $(basename "$file") to $tag"
+                fi
+              done
+            fi
           fi
 
           rm -f "$notes_file"

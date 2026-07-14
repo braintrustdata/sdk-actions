@@ -1,50 +1,87 @@
-ACTIONS  = FileList['actions/**/action.yml']
-SCHEMA   = 'scripts/github-action.schema.json'
+ACTIONS       = FileList['actions/**/action.yml']
+ACTION_SCHEMA = 'scripts/github-action.schema.json'
 
-task default: :generate
+# Golden workflow fixtures: bt-publishing-test's release workflows, generated into a
+# mirrored consumer-repo layout under test/release/<lang>/. Regenerated + drift-guarded
+# (like actions/) so a template change can't land without its rendered output updating.
+# `ref` is a fixed real sdk-actions commit so fixtures stay stable across regenerations
+# (fixtures never run — only the repo-root .github/workflows/ does); bump it deliberately.
+WORKFLOW_REF = '38dcec863c910f6802c03a94ab9aeb79931a0a3a'
+WORKFLOW_FIXTURES = [
+  { id: 'release/ruby/turnkey', dest: 'test/release/ruby/.github/workflows/release.yml',
+    args: %w[--gem-name bt-publishing-test --version-module BtPublishingTest] },
+  { id: 'release/ruby/custom', dest: 'test/release/ruby/.github/workflows/release-custom.yml',
+    args: %w[--gem-name bt-publishing-test --version-module BtPublishingTest] },
+  { id: 'release/py/turnkey', dest: 'test/release/py/.github/workflows/release.yml',
+    args: %w[--package-name bt-publishing-test] },
+  { id: 'release/py/custom', dest: 'test/release/py/.github/workflows/release-custom.yml',
+    args: %w[--package-name bt-publishing-test] },
+  { id: 'release/js/turnkey', dest: 'test/release/js/.github/workflows/release.yml',
+    args: %w[--package-name @braintrust/bt-publishing-test] },
+  { id: 'release/js/custom', dest: 'test/release/js/.github/workflows/release-custom.yml',
+    args: %w[--package-name @braintrust/bt-publishing-test] },
+].freeze
 
-desc 'Render actions/ from templates/, then validate them (YAML + schema)'
-task generate: %i[render validate]
+task default: :ci
 
-desc 'Render actions/ from templates/ (no validation)'
-task :render do
-  ruby 'scripts/generate.rb'
+desc 'All CI checks (actions + workflows)'
+task ci: %w[actions:ci workflows:ci]
+
+def yaml_errors(files)
+  require 'yaml'
+  files.sort.filter_map do |file|
+    YAML.safe_load_file(file)
+    nil
+  rescue Psych::SyntaxError => e
+    "  #{file}:#{e.line}:#{e.column}: #{e.problem}"
+  end
 end
 
-desc 'Run all checks on the generated actions (YAML + schema)'
-task validate: %w[validate:yaml validate:schema]
+def check_jsonschema!
+  on_path = ENV['PATH'].to_s.split(File::PATH_SEPARATOR)
+                       .any? { |dir| File.executable?(File.join(dir, 'check-jsonschema')) }
+  return if on_path
+  abort <<~MSG.strip
+    check-jsonschema not found on PATH. Install the toolchain with `mise install`
+    (or `pipx install check-jsonschema`), then re-run.
+  MSG
+end
 
-namespace :validate do
-  desc 'Check that every generated action parses as YAML (stdlib, no extra deps)'
-  task :yaml do
-    require 'yaml'
-    errors = ACTIONS.sort.filter_map do |file|
-      YAML.safe_load_file(file)
-      nil
-    rescue Psych::SyntaxError => e
-      "  #{file}:#{e.line}:#{e.column}: #{e.problem}"
-    end
+namespace :actions do
+  desc 'Render actions/ from templates/actions/'
+  task :generate do
+    ruby 'scripts/generate.rb'
+  end
+
+  desc 'Validate generated actions (YAML + GitHub Action schema)'
+  task :validate do
+    errors = yaml_errors(ACTIONS)
     abort "Malformed YAML in generated actions:\n#{errors.join("\n")}" unless errors.empty?
+    check_jsonschema!
+    sh 'check-jsonschema', '--schemafile', ACTION_SCHEMA, *ACTIONS
   end
 
-  desc 'Validate every generated action against the GitHub Action schema (needs check-jsonschema)'
-  task :schema do
-    on_path = ENV['PATH'].to_s.split(File::PATH_SEPARATOR)
-                         .any? { |dir| File.executable?(File.join(dir, 'check-jsonschema')) }
-    unless on_path
-      abort <<~MSG.strip
-        check-jsonschema not found on PATH. Install the toolchain with `mise install`
-        (or `pipx install check-jsonschema`), then re-run. To skip schema validation,
-        use `rake render` or `rake validate:yaml`.
-      MSG
-    end
-    sh 'check-jsonschema', '--schemafile', SCHEMA, *ACTIONS
+  desc 'CI guard: regenerate + validate, then fail if committed actions/ drifted'
+  task ci: %w[actions:generate actions:validate] do
+    sh 'git', 'diff', '--exit-code', 'actions/'
   end
 end
 
-namespace :ci do
-  desc 'CI guard: regenerate + validate, then fail if committed actions/ is out of sync with templates/'
-  task actions: :generate do
-    sh 'git', 'diff', '--exit-code', 'actions/'
+namespace :workflows do
+  desc 'Regenerate the golden workflow fixtures from templates/workflows/'
+  task :generate do
+    WORKFLOW_FIXTURES.each do |f|
+      sh 'bin/workflow', 'generate', f[:id], *f[:args], '--ref', WORKFLOW_REF, '--dest', f[:dest], '--force'
+    end
+  end
+
+  desc 'Validate the golden workflow fixtures (delegates to `bin/workflow validate`)'
+  task :validate do
+    WORKFLOW_FIXTURES.each { |f| sh 'bin/workflow', 'validate', f[:dest] }
+  end
+
+  desc 'CI guard: regenerate + validate, then fail if committed fixtures drifted'
+  task ci: %w[workflows:generate workflows:validate] do
+    sh 'git', 'diff', '--exit-code', *WORKFLOW_FIXTURES.map { |f| f[:dest] }
   end
 end

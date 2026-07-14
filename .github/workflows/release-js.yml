@@ -189,6 +189,12 @@ jobs:
           on_release_branch: ${{ needs.configure.outputs.on_release_branch }}
           notes: ${{ needs.prepare.outputs.notes }}
 
+      # Guard the SBOM generator against silent content regressions (subject/purl correctness,
+      # scope in group+purl, prod-only closure). Reads the sbom.json the dry-run just
+      # generated; bt-publishing-test-specific — this is test-bed glue, not a consumer step.
+      - name: Verify SBOM contents
+        run: ruby scripts/sbom_verify.rb test/release/js/sbom.json --subject bt-publishing-test --purl-prefix "pkg:npm/%40braintrust/bt-publishing-test@"
+
   request-approval:
     needs: [configure, prepare, validate]
     runs-on: ubuntu-24.04

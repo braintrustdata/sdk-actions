@@ -1,0 +1,98 @@
+name: Build Package Manifest
+description: >
+  Formats one package's release facts (scalars) into a single, well-formed package
+  manifest entry (compact JSON). Multi-package release workflows call this once per
+  package — specifying presentation (label, emoji) at the call site, near where it's
+  used — then splice the emitted entries into the `packages` input of `request-approval`
+  (or another multi-package release action). Single-package workflows don't need this:
+  pass the scalars straight to `request-approval`.
+
+  The output object contains only the fields you provide (empties are dropped). `pr_list`
+  (x1f-delimited) and `notes` (base64) are carried verbatim and JSON-escaped by `jq`, so
+  the entries are safe to splice into a JSON array via GitHub expression interpolation
+  without any further shell/`jq` in the consumer.
+
+inputs:
+  name:
+    description: "Package name (e.g. the registry name)"
+    required: false
+    default: ''
+  label:
+    description: "Display label for notifications (defaults, downstream, to name/tag)"
+    required: false
+    default: ''
+  emoji:
+    description: "Presentation emoji for notifications"
+    required: false
+    default: ''
+  version:
+    description: "Resolved package version"
+    required: false
+    default: ''
+  tag:
+    description: "Release tag (e.g. js-1.2.3)"
+    required: false
+    default: ''
+  prev_release:
+    description: "Previous release tag (for the diff link)"
+    required: false
+    default: ''
+  pr_list:
+    description: "x1f-delimited PR list (from prepare)"
+    required: false
+    default: ''
+  notes:
+    description: "Base64-encoded release notes (from prepare)"
+    required: false
+    default: ''
+  channel:
+    description: "Release channel / dist-tag (where applicable)"
+    required: false
+    default: ''
+  github_release:
+    description: "Whether a GitHub release should be created for this package"
+    required: false
+    default: ''
+
+outputs:
+  package:
+    description: "One package manifest entry as compact JSON (only the provided fields)"
+    value: ${{ steps.build.outputs.package }}
+
+runs:
+  using: composite
+  steps:
+    - name: Build package manifest entry
+      id: build
+      shell: bash
+      env:
+        NAME: ${{ inputs.name }}
+        LABEL: ${{ inputs.label }}
+        EMOJI: ${{ inputs.emoji }}
+        VERSION: ${{ inputs.version }}
+        TAG: ${{ inputs.tag }}
+        PREV_RELEASE: ${{ inputs.prev_release }}
+        PR_LIST: ${{ inputs.pr_list }}
+        NOTES: ${{ inputs.notes }}
+        CHANNEL: ${{ inputs.channel }}
+        GITHUB_RELEASE: ${{ inputs.github_release }}
+      run: |
+        set -euo pipefail
+        if ! command -v jq >/dev/null 2>&1; then
+          echo "::error title=jq not found::build-package-manifest requires jq."
+          exit 1
+        fi
+        # jq --arg JSON-escapes every value (incl. the x1f bytes in pr_list → ), so the
+        # emitted object is safe to splice into a JSON array by string interpolation. Empty
+        # fields are dropped so the entry carries only what the caller actually set.
+        PACKAGE="$(jq -nc \
+          --arg name "$NAME" --arg label "$LABEL" --arg emoji "$EMOJI" \
+          --arg version "$VERSION" --arg tag "$TAG" --arg prev_release "$PREV_RELEASE" \
+          --arg pr_list "$PR_LIST" --arg notes "$NOTES" --arg channel "$CHANNEL" \
+          --arg github_release "$GITHUB_RELEASE" \
+          '{name:$name, label:$label, emoji:$emoji, version:$version, tag:$tag,
+            prev_release:$prev_release, pr_list:$pr_list, notes:$notes, channel:$channel,
+            github_release:$github_release}
+           | with_entries(select(.value != ""))')"
+        echo "package=$PACKAGE" >> "$GITHUB_OUTPUT"
+        echo "Built package manifest entry: $(jq -c 'keys' <<<"$PACKAGE")"

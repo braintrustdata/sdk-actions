@@ -53,8 +53,8 @@ plus prebuilt npm tarballs and SBOMs in the source repository, attest those
 artifacts before upload, then call `release/lang/js/publish-tarballs` from the
 gated publish job. The action verifies the downloaded tarball attestations,
 then publishes the exact tarballs to npmjs in manifest order. After the source
-repository pushes its package tags, call `release/create-package-releases` with
-`sboms` to attach the per-package SBOM assets.
+repository pushes its package tags, call `release/create-package-releases`; it
+attaches each package's `sbom_asset` from the manifest directory.
 
 The manifest passed between build and publish jobs is JSON in this shape:
 
@@ -80,9 +80,10 @@ The manifest passed between build and publish jobs is JSON in this shape:
 
 `name` and `version` are required. `packages` must already be in publish order.
 `dir` and `commit` are source-repository metadata, useful while building and
-tagging. `tarball_asset` and `sbom_asset` identify the downloaded artifact
-basenames; when omitted, actions derive them from `name` and `version`. `tag`
-defaults to `name@version`; `release_title` defaults to `tag`; and
+tagging. `tarball_asset` identifies the downloaded tarball basename; when omitted,
+`publish-tarballs` derives it from `name` and `version`. `sbom_asset` is required
+by `create-package-releases` and is resolved relative to the manifest file's
+directory. `tag` defaults to `name@version`; `release_title` defaults to `tag`; and
 `release_body` defaults to a short publish message. `channel` and `provenance`
 may override the `publish-tarballs` defaults per package. JavaScript SBOM
 generation commonly uses `pnpm sbom`, which requires pnpm `>= 11.8`.
@@ -104,7 +105,7 @@ pulls in everything it needs.
 | `release/lang/js/pack-pnpm` · `pack-bun`, `release/lang/{py,ruby}/pack` | **Custom build**: build + pack + sign SBOM + build provenance in an unprivileged job (no publish credentials)                                                     |
 | `release/lang/<lang>/ship-package`                                      | **Custom build**: verify the attestation against the downloaded artifact → publish that exact artifact → create the GitHub release → notify                       |
 | `release/lang/js/publish-tarballs`                                      | Verify prebuilt npm tarballs by glob and publish the exact bytes to npmjs in manifest order                                                                       |
-| `release/create-package-releases`                                       | Create per-package GitHub releases from existing manifest tags, titles, and bodies, with optional per-package SBOM assets                                         |
+| `release/create-package-releases`                                       | Create per-package GitHub releases from existing manifest tags, titles, and bodies, attaching each `sbom_asset` from the manifest directory                       |
 | `release/verify-package`                                                | Verify downloaded artifact attestations without using a language-specific ship action                                                                             |
 
 Inputs and outputs are documented in each `action.yml`. Reference an action by

@@ -2,23 +2,24 @@
 # sdk-actions: {"family":"release","version":"1.0.0"}
 name: Request Release Approval
 description: >
-  Issues the release approval request: posts the pre-approval job summary and Slack
-  notification. Runs before the environment gate on ship — reviewers see this and then
-  approve the gated ship/ship-package job. The job goes green the moment the request is
-  issued (the actual gate is the `environment:` on the ship job), so a green
-  request-approval is truthful and the ship job is visibly parked at the gate.
+  Issues the release approval request for one OR many packages: posts the pre-approval job
+  summary and Slack notification, then the gated ship job(s) park at the environment gate for
+  reviewers. A green request-approval is truthful — the real gate is the `environment:` on the
+  ship job(s).
+
+  Two input surfaces, one internal model:
+    • Single package — pass the scalar inputs (release_tag, prev_release, pr_list, notes,
+      label, emoji). This is the common path (turnkey); no JSON required.
+    • Many packages — pass `packages`: a JSON array of entries, one per package. Build each
+      entry with the build-package-manifest action and splice them together. When set,
+      `packages` overrides the scalar inputs.
+  Scalars are normalized to a one-package list, so there is a single render path.
 
 inputs:
+  # ── shared (whole release) ──
   sha:
     description: "Commit SHA being released"
     required: true
-  release_tag:
-    description: "The release tag (e.g. v0.3.2)"
-    required: true
-  prev_release:
-    description: "Previous release tag"
-    required: false
-    default: ''
   branch:
     description: "Branch containing the SHA"
     required: true
@@ -28,18 +29,20 @@ inputs:
   commit_message:
     description: "Commit message at the SHA"
     required: true
-  pr_list:
-    description: "x1f-delimited PR list from prepare action"
-    required: false
-    default: ''
-  notes:
-    description: "Base64-encoded release notes from prepare action"
-    required: false
-    default: ''
   dry_run:
     description: "Whether this is a dry run"
     required: false
     default: 'false'
+  title:
+    description: >
+      Overall subject for the approval (e.g. the repo or a release name). Defaults to the
+      single package's label when there is one package, else the repository.
+    required: false
+    default: ''
+  emoji:
+    description: "Default emoji prefix (a package entry may override its own)"
+    required: false
+    default: ':package:'
   slack_token:
     description: "Slack bot token for posting messages"
     required: false
@@ -49,100 +52,161 @@ inputs:
     required: false
     default: ''
   slack_mention:
-    description: "Optional Slack handle or group to @mention in the approval request (e.g. @sdk-eng)"
+    description: "Optional Slack handle or group to @mention in the approval request"
     required: false
     default: ''
-  emoji:
-    description: "Emoji prefix for Slack messages"
+  # ── single-package scalar shorthand (ignored when `manifest` is set) ──
+  release_tag:
+    description: "Single-package: the release tag (e.g. v0.3.2)"
     required: false
-    default: ':package:'
+    default: ''
+  prev_release:
+    description: "Single-package: previous release tag (for the diff link)"
+    required: false
+    default: ''
+  pr_list:
+    description: "Single-package: x1f-delimited PR list from prepare"
+    required: false
+    default: ''
+  notes:
+    description: "Single-package: base64-encoded release notes from prepare"
+    required: false
+    default: ''
   label:
+    description: "Single-package: display label (defaults to the repository)"
+    required: false
+    default: ''
+  # ── multi-package ──
+  packages:
     description: >
-      Display name for the thing being released (e.g. the package name). When set,
-      it becomes the notification subject instead of the repository — useful when a
-      repo publishes multiple packages. Defaults to the repository.
+      Multi-package: a JSON array of package entries. Build each entry with the
+      build-package-manifest action and splice its `package` outputs into the array
+      (one element per package). Each entry:
+      name/label, tag (or name+version), prev_release, pr_list (x1f), notes (base64) or
+      release_body (plain), emoji. When set, overrides the scalar inputs.
     required: false
     default: ''
 
 runs:
   using: composite
   steps:
+    # Normalize the two input surfaces to one manifest. Scalars (single package) become a
+    # one-element manifest; an explicit `manifest` (inline JSON or file path) is used as-is.
+    - name: Normalize packages
+      id: manifest
+      shell: bash
+      env:
+        PACKAGES: ${{ inputs.packages }}
+        RELEASE_TAG: ${{ inputs.release_tag }}
+        LABEL: ${{ inputs.label }}
+        PREV_RELEASE: ${{ inputs.prev_release }}
+        PR_LIST: ${{ inputs.pr_list }}
+        NOTES: ${{ inputs.notes }}
+        EMOJI: ${{ inputs.emoji }}
+        TITLE: ${{ inputs.title }}
+      run: |
+        set -euo pipefail
+        if [ -n "$PACKAGES" ]; then
+          # Accept a bare array of entries or a {"packages":[…]} wrapper.
+          M="$(jq -c 'if type=="array" then {packages: .} elif .packages then {packages: .packages} else {packages: []} end' <<<"$PACKAGES")"
+        else
+          # Build a one-package list from the scalar shorthand (the common single-package path).
+          M="$(jq -nc \
+            --arg tag "$RELEASE_TAG" --arg label "$LABEL" --arg prev "$PREV_RELEASE" \
+            --arg pr "$PR_LIST" --arg notes "$NOTES" --arg emoji "$EMOJI" \
+            '{packages:[{label:$label, tag:$tag, prev_release:$prev, pr_list:$pr, notes:$notes, emoji:$emoji}]}')"
+        fi
+        M="$(jq -c . <<<"$M")"  # compact (and fail the step on malformed JSON)
+
+        COUNT="$(jq '.packages | length' <<<"$M")"
+        if [ -n "$TITLE" ]; then
+          SUBJECT="$TITLE"
+        elif [ "$COUNT" = "1" ]; then
+          SUBJECT="$(jq -r '.packages[0] | .label // .name // .tag // ""' <<<"$M")"
+          [ -z "$SUBJECT" ] && SUBJECT="$GITHUB_REPOSITORY"
+        else
+          SUBJECT="$GITHUB_REPOSITORY"
+        fi
+        {
+          echo "manifest=$M"
+          echo "subject=$SUBJECT"
+        } >> "$GITHUB_OUTPUT"
+
     - name: Post release summary
       shell: bash
       env:
-        TAG: ${{ inputs.release_tag }}
-        LABEL: ${{ inputs.label }}
+        MANIFEST_JSON: ${{ steps.manifest.outputs.manifest }}
+        SUBJECT: ${{ steps.manifest.outputs.subject }}
+        DEFAULT_EMOJI: ${{ inputs.emoji }}
         COMMIT_MSG: ${{ inputs.commit_message }}
-        NOTES_B64: ${{ inputs.notes }}
         BRANCH: ${{ inputs.branch }}
         SHA: ${{ inputs.sha }}
-        PREV_RELEASE: ${{ inputs.prev_release }}
         ON_RELEASE_BRANCH: ${{ inputs.on_release_branch }}
         DRY_RUN: ${{ inputs.dry_run }}
         ACTOR: ${{ github.actor }}
       run: |
-        NOTES=$(echo "$NOTES_B64" | base64 -d 2>/dev/null)
-        if [ -z "$NOTES" ]; then NOTES="_Release notes unavailable._"; fi
+        set -euo pipefail
+        {
+          echo "## $SUBJECT"
+          echo ""
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "> [!NOTE]"
+            echo "> Dry run: Nothing will be tagged or published."
+            echo ""
+          fi
+          if [ "$ON_RELEASE_BRANCH" = "false" ]; then
+            echo "> [!WARNING]"
+            echo "> Release SHA is not on an expected release branch. Is this intentional?"
+            echo ""
+          fi
+          BRANCH_LABEL="[$BRANCH]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/tree/$BRANCH)"
+          [ "$ON_RELEASE_BRANCH" = "false" ] && BRANCH_LABEL="$BRANCH_LABEL ⚠️"
+          echo "**SHA:** [$SHA]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/commit/$SHA)"
+          echo "**Commit:** $COMMIT_MSG"
+          echo "**Branch:** $BRANCH_LABEL"
+          echo "**Initiated by:** [$ACTOR]($GITHUB_SERVER_URL/$ACTOR)"
+          echo ""
+        } >> "$GITHUB_STEP_SUMMARY"
 
-        BRANCH_LABEL="[$BRANCH]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/tree/$BRANCH)"
-        if [ "$ON_RELEASE_BRANCH" = "false" ]; then
-          BRANCH_LABEL="$BRANCH_LABEL ⚠️"
-        fi
-
-        # Subject is the package label when set, else the repository. The repo
-        # remains in every link below, so it is never lost.
-        SUBJECT="$GITHUB_REPOSITORY"
-        [ -n "$LABEL" ] && SUBJECT="$LABEL"
-
-        echo "## $SUBJECT $TAG" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-
-        if [ "$DRY_RUN" = "true" ]; then
-          echo "> [!NOTE]" >> $GITHUB_STEP_SUMMARY
-          echo "> Dry run: Nothing will be tagged or published." >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-        fi
-
-        if [ "$ON_RELEASE_BRANCH" = "false" ]; then
-          echo "> [!WARNING]" >> $GITHUB_STEP_SUMMARY
-          echo "> Release SHA is not on an expected release branch. Is this intentional?" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-        fi
-
-        echo "**SHA:** [$SHA]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/commit/$SHA)" >> $GITHUB_STEP_SUMMARY
-        echo "**Commit:** $COMMIT_MSG" >> $GITHUB_STEP_SUMMARY
-        echo "**Branch:** $BRANCH_LABEL" >> $GITHUB_STEP_SUMMARY
-        echo "**Initiated by:** [$ACTOR]($GITHUB_SERVER_URL/$ACTOR)" >> $GITHUB_STEP_SUMMARY
-
-        if [ -n "$PREV_RELEASE" ]; then
-          DIFF_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/${PREV_RELEASE}...${SHA}"
-          echo "**Diff:** [${PREV_RELEASE}...$TAG]($DIFF_URL)" >> $GITHUB_STEP_SUMMARY
-        fi
-
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "$NOTES" >> $GITHUB_STEP_SUMMARY
+        while IFS= read -r encoded; do
+          p="$(printf '%s' "$encoded" | base64 -d)"
+          label="$(jq -r '.label // .name // .tag // ""' <<<"$p")"
+          tag="$(jq -r 'if .tag and .tag != "" then .tag elif .name then "\(.name)@\(.version)" else "" end' <<<"$p")"
+          emoji="$(jq -r --arg d "$DEFAULT_EMOJI" '.emoji // $d' <<<"$p")"
+          prev="$(jq -r '.prev_release // ""' <<<"$p")"
+          notes_b64="$(jq -r '.notes // ""' <<<"$p")"
+          if [ -n "$notes_b64" ]; then
+            NOTES="$(printf '%s' "$notes_b64" | base64 -d 2>/dev/null || true)"
+          else
+            NOTES="$(jq -r '.release_body // ""' <<<"$p")"
+          fi
+          {
+            echo "### $emoji $label${tag:+ $tag}"
+            if [ -n "$prev" ]; then
+              echo "**Diff:** [${prev}...${tag:-$SHA}]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/${prev}...${SHA})"
+            fi
+            echo ""
+            echo "${NOTES:-_Release notes unavailable._}"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+        done < <(jq -r '.packages[]? | @base64' <<<"$MANIFEST_JSON")
 
     - name: Build pending message
       id: message-pending
       shell: bash
       env:
-        TAG: ${{ inputs.release_tag }}
-        LABEL: ${{ inputs.label }}
-        EMOJI: ${{ inputs.emoji }}
+        MANIFEST_JSON: ${{ steps.manifest.outputs.manifest }}
+        SUBJECT: ${{ steps.manifest.outputs.subject }}
+        DEFAULT_EMOJI: ${{ inputs.emoji }}
         BRANCH: ${{ inputs.branch }}
         ON_RELEASE_BRANCH: ${{ inputs.on_release_branch }}
-        PREV_RELEASE: ${{ inputs.prev_release }}
         SHA: ${{ inputs.sha }}
         DRY_RUN: ${{ inputs.dry_run }}
         SLACK_MENTION: ${{ inputs.slack_mention }}
         APPROVE_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         ACTOR_LINK: <${{ github.server_url }}/${{ github.actor }}|${{ github.actor }}>
-        PR_LIST_RAW: ${{ inputs.pr_list }}
       run: |
-        # Subject is the package label when set, else the repository.
-        SUBJECT="$GITHUB_REPOSITORY"
-        [ -n "$LABEL" ] && SUBJECT="$LABEL"
-
+        set -euo pipefail
         BRANCH_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/tree/$BRANCH"
         BRANCH_LINK="<$BRANCH_URL|$BRANCH>"
         if [ "$ON_RELEASE_BRANCH" = "false" ]; then
@@ -151,37 +215,39 @@ runs:
           BRANCH_INFO="$BRANCH_LINK"
         fi
 
-        DIFF_PART=""
-        if [ -n "$PREV_RELEASE" ]; then
-          DIFF_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/${PREV_RELEASE}...${SHA}"
-          DIFF_PART=" · <$DIFF_URL|${PREV_RELEASE}...$TAG>"
-        fi
-
-        PR_LIST=$(echo "$PR_LIST_RAW" | tr $'\x1f' '\n' | sed '/^$/d')
-
-        TEXT="$EMOJI *$SUBJECT $TAG* awaiting approval"
+        TEXT="$DEFAULT_EMOJI *$SUBJECT* awaiting approval"
         TEXT="$TEXT\nInitiated by: $ACTOR_LINK"
-
         if [ "$DRY_RUN" = "true" ]; then
           TEXT="$TEXT\n> :information_source: _Dry run: nothing will be tagged or published._"
         fi
+        TEXT="$TEXT\n${BRANCH_INFO}"
 
-        TEXT="$TEXT\n${BRANCH_INFO}${DIFF_PART}"
-
-        if [ -n "$PR_LIST" ]; then
-          TEXT="$TEXT\n$PR_LIST"
-        fi
+        while IFS= read -r encoded; do
+          p="$(printf '%s' "$encoded" | base64 -d)"
+          label="$(jq -r '.label // .name // .tag // ""' <<<"$p")"
+          tag="$(jq -r 'if .tag and .tag != "" then .tag elif .name then "\(.name)@\(.version)" else "" end' <<<"$p")"
+          emoji="$(jq -r --arg d "$DEFAULT_EMOJI" '.emoji // $d' <<<"$p")"
+          prev="$(jq -r '.prev_release // ""' <<<"$p")"
+          pr_raw="$(jq -r '.pr_list // ""' <<<"$p")"
+          LINE="$emoji *$label${tag:+ $tag}*"
+          if [ -n "$prev" ]; then
+            DIFF_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/${prev}...${SHA}"
+            LINE="$LINE · <$DIFF_URL|${prev}...${tag:-$SHA}>"
+          fi
+          TEXT="$TEXT\n$LINE"
+          PR_LIST="$(printf '%s' "$pr_raw" | tr $'\x1f' '\n' | sed '/^$/d')"
+          [ -n "$PR_LIST" ] && TEXT="$TEXT\n$PR_LIST"
+        done < <(jq -r '.packages[]? | @base64' <<<"$MANIFEST_JSON")
 
         if [ -n "$SLACK_MENTION" ]; then
           TEXT="$TEXT\n$SLACK_MENTION please review and approve."
         fi
-
         TEXT="$TEXT\n<$APPROVE_URL|View changes & approve>"
 
         { echo 'text<<SLACK_DELIMITER'
           printf '%s\n' "$TEXT"
           echo 'SLACK_DELIMITER'
-        } >> $GITHUB_OUTPUT
+        } >> "$GITHUB_OUTPUT"
 
     - name: Send Slack message
       shell: bash

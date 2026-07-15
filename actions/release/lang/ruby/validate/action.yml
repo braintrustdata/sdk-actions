@@ -213,12 +213,12 @@ runs:
           echo "::error title=SBOM failed::Gemfile.lock not found in $(pwd) — bundle install must run before SBOM generation."
           exit 1
         fi
-        # Map Gemfile.lock → CycloneDX 1.6 JSON with Bundler's own lockfile parser.
+        # Map Gemfile.lock → CycloneDX 1.7 JSON with Bundler's own lockfile parser.
         # Only the gem's RUNTIME closure is included: we walk the dependency graph
         # from the gem itself, so the dev/test toolchain (rubocop, rake, …) that lives
         # in Gemfile.lock but is not a runtime dependency of the published gem is
-        # excluded. The gem is the SBOM subject (metadata.component), its runtime
-        # dependency closure are the components.
+        # excluded. The gem is the SBOM subject (metadata.component); its runtime
+        # closure are the components; the dependencies graph records subject→deps edges.
         ruby <<'RUBY'
         require 'bundler'
         require 'json'
@@ -242,9 +242,17 @@ runs:
           seen[name] = spec
           queue.concat(spec.dependencies.map(&:name))
         end
-        component = ->(s) do
-          { 'type' => 'library', 'name' => s.name, 'version' => s.version.to_s,
-            'purl' => "pkg:gem/#{s.name}@#{s.version}" }
+        ref = ->(s) { "pkg:gem/#{s.name}@#{s.version}" }
+        component = ->(s, type) do
+          { 'type' => type, 'name' => s.name, 'version' => s.version.to_s,
+            'purl' => ref.call(s), 'bom-ref' => ref.call(s) }
+        end
+        # Dependency edges (NTIA dependency-relationship element): each node → its direct
+        # runtime deps that are in the BOM (the subject + its closure).
+        in_bom = ->(n) { n == root.name || seen.key?(n) }
+        edges = ->(s) do
+          { 'ref' => ref.call(s),
+            'dependsOn' => s.dependencies.map(&:name).select { |n| in_bom.call(n) }.map { |n| ref.call(by_name[n]) }.uniq }
         end
         bom = {
           'bomFormat'    => 'CycloneDX',
@@ -253,12 +261,13 @@ runs:
           # + serialNumber are all present (see actions/attest src/sbom.ts). Don't remove.
           'serialNumber' => "urn:uuid:#{SecureRandom.uuid}",
           'version'      => 1,
-          'metadata'    => {
+          'metadata'     => {
             # CycloneDX ≥1.5 tools shape (the array-of-tools form was deprecated in 1.5).
             'tools'     => { 'components' => [{ 'type' => 'application', 'group' => 'braintrust', 'name' => 'sdk-actions ruby sbom' }] },
-            'component' => component.call(root).merge('type' => 'application'),
+            'component' => component.call(root, 'library'),
           },
-          'components'  => seen.values.sort_by(&:name).map { |s| component.call(s) },
+          'components'   => seen.values.sort_by(&:name).map { |s| component.call(s, 'library') },
+          'dependencies' => [edges.call(root)] + seen.values.sort_by(&:name).map { |s| edges.call(s) },
         }
         File.write('sbom.json', JSON.pretty_generate(bom))
         puts "Wrote #{Dir.pwd}/sbom.json (subject: #{root.name}, #{seen.size} runtime components)"

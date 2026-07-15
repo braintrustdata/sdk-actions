@@ -14,37 +14,43 @@ These actions can be used in combination to bootstrap quickly or individually to
 - **Python**: a `uv`-buildable project; Python pinned via `.python-version` / `.tool-versions`.
 - **Ruby**: needs a `rake build` that emits exactly one `pkg/*.gem`, and `rake lint`.
 
-### Adopting the release workflow
+### Generate a release workflow
 
-1. **Pick a shape**:
-   - **Turnkey** builds and publishes for you in one gated job. Recommended for most applications.
-   - **Custom build** lets you build your own artifact and hands it to a publish-only job that verifies and ships it, keeping the same security guarantees.
+Generate one with `bin/workflow`: run it from an sdk-actions checkout and it renders a clean, ready-to-commit release workflow into your repo, then keeps it in sync with upstream.
 
-2. **Copy the canonical template** for your language + shape into your repo's
-   `.github/workflows/`:
+1. **Pick a template.** *Turnkey* means we build and publish in one gated job; *custom* means you build the artifact yourself and a gated, publish-only job verifies its attestation and ships it (same trusted-publishing + provenance guarantees).
 
-   | Language   | Turnkey                                                  | Custom build                                                           |
-   | ---------- | -------------------------------------------------------- | ---------------------------------------------------------------------- |
-   | JavaScript | [`release-js.yml`](.github/workflows/release-js.yml)     | [`release-js-custom.yml`](.github/workflows/release-js-custom.yml)     |
-   | Python     | [`release-py.yml`](.github/workflows/release-py.yml)     | [`release-py-custom.yml`](.github/workflows/release-py-custom.yml)     |
-   | Ruby       | [`release-ruby.yml`](.github/workflows/release-ruby.yml) | [`release-ruby-custom.yml`](.github/workflows/release-ruby-custom.yml) |
+   | Template | When to use |
+   |---|---|
+   | `release/js/turnkey` | JavaScript, standard build — we build and publish. |
+   | `release/js/custom` | JavaScript, you own the build (monorepo, bundler, custom pipeline). |
+   | `release/py/turnkey` | Python, standard build — we build and publish. |
+   | `release/py/custom` | Python, you own the build. |
+   | `release/ruby/turnkey` | Ruby, standard build — we build and publish. |
+   | `release/ruby/custom` | Ruby, you own the build. |
 
-3. **Configure an OIDC trusted publisher** on your registry (npm / PyPI / RubyGems) for this repo + workflow filename (and environment, if gated) — publishing and attestation use it, no long-lived tokens.
-4. **Adapt the template to your package.** The template demonstrates an actual package deploy and includes glue to make that function: other applications will want to remove that glue, so review the whole file before adapting. The comments flag what typically changes (version source, package/gem name, working directory), but they aren't exhaustive.
-5. **Record the upstream SHA you based it on** Copy the sdk-actions commit your copy of the workflow was adapted from, e.g. in a header comment. Tracking it lets you (or an agent) diff your copy against a newer upstream template and sync changes deliberately as this repo evolves.
+2. **Generate it,** writing into your repo:
+   ```
+   bin/workflow generate release/ruby/turnkey --gem-name braintrust --version-module Braintrust --dest ../braintrust-ruby/.github/workflows/release.yml
+   ```
+   Each template declares its own parameters; `bin/workflow generate <id> --help` lists them (JS exposes `--channel`/`--access`, Ruby `--version-module`, and so on). The generated workflow pins the actions to `--ref` (defaults to `origin/main`) and carries a provenance header for updates. Run `bin/workflow validate <file>` to schema-check a workflow before committing it.
+
+3. **Follow post-generation instructions** After writing the file, `bin/workflow` prints a checklist: typically creating environments, setting up OIDC trusted publishing on your registry, and some env vars (e.g. for Slack).
 
 ### Updating a release workflow
 
-Actions are pinned by commit SHA. Bump the SHA to pick up changes. To judge whether a bump is safe, compare the version stamped into each `action.yml` header between the old and new SHA:
+The generated file's provenance header records the template, ref, and params, so pulling in upstream improvements is mechanical:
 
-```yaml
-# sdk-actions: {"family":"release","version":"1.0.0"}
-
-# Tip: this is machine-readable:
-#   sed -n 's/^# sdk-actions: //p' action.yml | jq -r .version   # → 1.0.0
+```
+bin/workflow compare release.yml    # preview the diff against a freshly-rendered baseline
+bin/workflow update  release.yml    # 3-way merge upstream changes in, keeping your edits
 ```
 
-These actions follow semantic versioning: expect breaking changes when the major version updates.
+`update` re-renders the old and new baselines and applies only the delta, so your customizations survive and only genuine conflicts are flagged. It bumps the pinned sdk-actions ref as part of the merge; whether a bump is breaking is signalled by the soft-semver stamped in each `action.yml` header (a major jump means breaking changes):
+```
+# sdk-actions: {"family":"release","version":"1.0.0"}
+#   machine-readable:  sed -n 's/^# sdk-actions: //p' action.yml | jq -r .version
+```
 
 ### Manifest-driven npm tarball releases
 
@@ -90,10 +96,7 @@ generation commonly uses `pnpm sbom`, which requires pnpm `>= 11.8`.
 
 ### Available release actions
 
-The release workflow is composed from these actions. You normally get them via
-the template, but they're listed here as a reference for customizing it — each is
-**self-contained** (calls no other action in this repo), so a single SHA pin
-pulls in everything it needs.
+The workflow is composed from these actions — `bin/workflow generate` wires them for you, but they're listed here for reference. Each is **self-contained** (calls no other action in this repo), so a single SHA pin pulls in everything it needs.
 
 | Action                                                                  | Purpose                                                                                                                                                           |
 | ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -108,8 +111,7 @@ pulls in everything it needs.
 | `release/create-npm-package-github-releases`                            | Create npm package GitHub releases from existing manifest tags, titles, and bodies, attaching each `sbom_asset` from the manifest directory                       |
 | `release/verify-package`                                                | Verify downloaded artifact attestations without using a language-specific ship action                                                                             |
 
-Inputs and outputs are documented in each `action.yml`. Reference an action by
-commit SHA:
+Inputs and outputs are documented in each `action.yml`. Reference an action by commit SHA:
 
 ```yaml
 - uses: braintrustdata/sdk-actions/actions/release/prepare@<sha>
@@ -117,5 +119,4 @@ commit SHA:
 
 ## Developing
 
-`actions/` is **generated** from `templates/` — never edit it by hand. See
-[CONTRIBUTING.md](CONTRIBUTING.md) for the template system and workflow.
+`actions/` is **generated** from `templates/actions/`: never edit it by hand. See [CONTRIBUTING.md](CONTRIBUTING.md) for the template system and tooling.

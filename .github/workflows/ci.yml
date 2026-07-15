@@ -6,9 +6,9 @@ on:
   pull_request:
 
 jobs:
-  # Regenerates actions/ from templates/, validates them (YAML + schema), and
-  # fails if the committed actions/ is out of sync. actions/ is generated output
-  # and must always match `rake generate`. Least-privilege: no secrets in scope.
+  # Regenerates actions/ AND the golden workflow fixtures from templates/, validates
+  # them (YAML + schema), and fails if either committed output is out of sync. Both are
+  # generated output and must always match the templates. Least-privilege: no secrets.
   #
   # Tool versions come from mise.toml (single source of truth). Ruby is installed
   # prebuilt by setup-ruby (fast) rather than compiled by mise; everything else
@@ -31,4 +31,4 @@ jobs:
         uses: jdx/mise-action@dba19683ed58901619b14f395a24841710cb4925 # v4.1.0
 
       - name: Regenerate, validate, and verify in sync
-        run: rake ci:actions
+        run: rake ci

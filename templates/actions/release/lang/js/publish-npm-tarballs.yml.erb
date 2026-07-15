@@ -1,6 +1,6 @@
-name: Publish JavaScript Tarballs
+name: Publish npm Tarballs
 description: >
-  Gated publish action for manifest-driven JavaScript releases. Verifies prebuilt
+  Gated publish action for manifest-driven npm package releases. Verifies prebuilt
   npm tarball attestations, publishes the exact downloaded tarballs to npmjs with
   OIDC, and posts a concise release summary. It does not build, pack, create
   GitHub releases, or upload SBOM assets.
@@ -71,14 +71,14 @@ runs:
         DEFAULT_CHANNEL: ${{ inputs.channel }}
         DEFAULT_PROVENANCE: ${{ inputs.provenance }}
         DRY_RUN: ${{ inputs.dry_run }}
-        REPORT: ${{ runner.temp }}/sdk-actions-publish-tarballs.tsv
+        REPORT: ${{ runner.temp }}/sdk-actions-publish-npm-tarballs.tsv
         NODE_AUTH_TOKEN: ''
         NPM_TOKEN: ''
       run: |
         set -euo pipefail
 
         if ! command -v jq >/dev/null 2>&1; then
-          echo "::error title=jq not found::publish-tarballs requires jq to read the release manifest."
+          echo "::error title=jq not found::publish-npm-tarballs requires jq to read the release manifest."
           exit 1
         fi
 
@@ -169,16 +169,16 @@ runs:
       shell: bash
       env:
         MANIFEST: ${{ inputs.manifest }}
-        REPORT: ${{ runner.temp }}/sdk-actions-publish-tarballs.tsv
+        REPORT: ${{ runner.temp }}/sdk-actions-publish-npm-tarballs.tsv
         DRY_RUN: ${{ inputs.dry_run }}
       run: |
         set -euo pipefail
 
         count="$(jq '.packages | length' "$MANIFEST")"
         if [ "$DRY_RUN" = "true" ]; then
-          echo "## JavaScript tarball publish dry run" >> "$GITHUB_STEP_SUMMARY"
+          echo "## npm tarball publish dry run" >> "$GITHUB_STEP_SUMMARY"
         else
-          echo "## JavaScript tarballs published" >> "$GITHUB_STEP_SUMMARY"
+          echo "## npm tarballs published" >> "$GITHUB_STEP_SUMMARY"
         fi
         echo "" >> "$GITHUB_STEP_SUMMARY"
         echo "**Packages:** $count" >> "$GITHUB_STEP_SUMMARY"
@@ -196,7 +196,7 @@ runs:
       id: message-published
       shell: bash
       env:
-        REPORT: ${{ runner.temp }}/sdk-actions-publish-tarballs.tsv
+        REPORT: ${{ runner.temp }}/sdk-actions-publish-npm-tarballs.tsv
         SLACK_MENTION: ${{ inputs.slack_mention }}
         DRY_RUN: ${{ inputs.dry_run }}
         RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -204,9 +204,9 @@ runs:
         set -euo pipefail
 
         if [ "$DRY_RUN" = "true" ]; then
-          text="*JavaScript tarball publish dry run*"
+          text="*npm tarball publish dry run*"
         else
-          text="*JavaScript tarballs published*"
+          text="*npm tarballs published*"
         fi
         while IFS=$'\t' read -r name version status tarball; do
           npm_name="$(jq -rn --arg v "$name" '$v|@uri')"
@@ -233,7 +233,7 @@ runs:
         FAILURE_SLACK_MENTION: ${{ inputs.failure_slack_mention }}
         RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
       run: |
-        text="*JavaScript tarball publish failed*\n<$RUN_URL|View run>"
+        text="*npm tarball publish failed*\n<$RUN_URL|View run>"
         if [ -n "$FAILURE_SLACK_MENTION" ]; then
           text="$text\n$FAILURE_SLACK_MENTION"
         fi

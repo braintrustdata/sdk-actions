@@ -63,11 +63,8 @@ jobs:
         run: |
           CURRENT=$(npm view @braintrust/bt-publishing-test version 2>/dev/null || echo "0.0.0")
           CURRENT=${CURRENT:-0.0.0}
-          # TEMP (idempotency test): reuse the already-published version to exercise present→skip.
-          # Revert to the increment below after confirming.
-          echo "version=$CURRENT" >> $GITHUB_OUTPUT
-          # IFS='.' read -r major minor patch <<< "$CURRENT"
-          # echo "version=$major.$minor.$((patch + 1))" >> $GITHUB_OUTPUT
+          IFS='.' read -r major minor patch <<< "$CURRENT"
+          echo "version=$major.$minor.$((patch + 1))" >> $GITHUB_OUTPUT
 
   # FACT-FIND (version/tag/notes/registry) + emit the package manifest. contents: write for notes.
   configure:
@@ -126,10 +123,6 @@ jobs:
           already_published: ${{ needs.configure.outputs.already_published }}
           build: 'false'   # the pack job owns the build in the custom shape
           sbom: 'false'    # pack generates + attests the SBOM
-          # TEMP (idempotency test): relax so a re-run of an already-published version reaches
-          # ship (mirrors the multi-package config). Revert after confirming.
-          check_version_unpublished: 'false'
-          check_tag_unused: 'false'
 
   # BUILD side — unprivileged: NO publish credentials. Builds + packs + attests, then uploads.
   pack:

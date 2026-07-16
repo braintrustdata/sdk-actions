@@ -52,10 +52,8 @@ jobs:
         run: |
           CURRENT=$(curl -sf https://pypi.org/pypi/bt-publishing-test/json 2>/dev/null | jq -r '.info.version // empty' || true)
           CURRENT=${CURRENT:-0.0.0}
-          # TEMP (idempotency test): reuse the already-published version to exercise present→skip. Revert after.
-          echo "version=$CURRENT" >> $GITHUB_OUTPUT
-          # IFS='.' read -r major minor patch <<< "$CURRENT"
-          # echo "version=$major.$minor.$((patch + 1))" >> $GITHUB_OUTPUT
+          IFS='.' read -r major minor patch <<< "$CURRENT"
+          echo "version=$major.$minor.$((patch + 1))" >> $GITHUB_OUTPUT
 
   configure:
     needs: bump
@@ -108,9 +106,6 @@ jobs:
           already_published: ${{ needs.configure.outputs.already_published }}
           build: 'false'   # the pack job owns the build
           sbom: 'false'    # pack generates + attests the SBOM
-          # TEMP (idempotency test): relax so a re-run of an already-published version reaches ship. Revert after.
-          check_version_unpublished: 'false'
-          check_tag_unused: 'false'
 
   # BUILD side — unprivileged: NO publish credentials.
   pack:

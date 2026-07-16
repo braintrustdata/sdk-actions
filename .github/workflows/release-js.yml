@@ -104,11 +104,8 @@ jobs:
         run: |
           CURRENT=$(npm view @braintrust/bt-publishing-test version 2>/dev/null || echo "0.0.0")
           CURRENT=${CURRENT:-0.0.0}
-          # TEMP (idempotency test): reuse the already-published version to exercise present→skip
-          # on the turnkey path. Revert to the increment below after confirming.
-          echo "version=$CURRENT" >> $GITHUB_OUTPUT
-          # IFS='.' read -r major minor patch <<< "$CURRENT"
-          # echo "version=$major.$minor.$((patch + 1))" >> $GITHUB_OUTPUT
+          IFS='.' read -r major minor patch <<< "$CURRENT"
+          echo "version=$major.$minor.$((patch + 1))" >> $GITHUB_OUTPUT
 
   # FACT-FIND (version/tag/notes/registry) + emit the package manifest. contents: write for notes.
   configure:
@@ -172,10 +169,6 @@ jobs:
           on_release_branch: ${{ needs.configure.outputs.on_release_branch }}
           notes: ${{ needs.configure.outputs.notes }}
           already_published: ${{ needs.configure.outputs.already_published }}
-          # TEMP (idempotency test): relax so a re-run of an already-published version reaches
-          # build-and-ship (which then skips the publish). Revert after confirming.
-          check_version_unpublished: 'false'
-          check_tag_unused: 'false'
 
       # Guard the SBOM generator against silent content regressions (subject/purl correctness,
       # scope in group+purl, prod-only closure). Reads the sbom.json the dry-run just

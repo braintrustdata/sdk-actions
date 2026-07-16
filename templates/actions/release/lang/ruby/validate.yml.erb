@@ -70,7 +70,11 @@ inputs:
     required: false
     default: 'true'
   check_version_unpublished:
-    description: "Fail if the version is already published to RubyGems"
+    description: >
+      Policy when the target version is already published to RubyGems: 'true' (default)
+      fails, 'warn' logs a warning and continues, 'false' skips the check. Use 'warn'
+      in multi-package repos so a heal re-run isn't aborted — the exposed
+      `already_published` output then drives the approval notice + ship skip.
     required: false
     default: 'true'
   check_notes_not_blank:
@@ -81,6 +85,11 @@ inputs:
     description: "Hard-fail (instead of warn) when the SHA is off the release branch"
     required: false
     default: 'false'
+
+outputs:
+  already_published:
+    description: "Whether the target version is already published to the registry (from the availability check)."
+    value: ${{ steps.version-check.outputs.already_published }}
 
 runs:
   using: composite
@@ -94,7 +103,9 @@ runs:
 
 <%= render_step('lang/ruby/read-version') %>
 
-<%= render_step('lang/ruby/rubygems/availability', if: "${{ inputs.check_version_unpublished == 'true' }}") %>
+<%= render_step('lang/ruby/rubygems/availability',
+      if:       "${{ inputs.check_version_unpublished != 'false' }}",
+      severity: "${{ inputs.check_version_unpublished }}") %>
 
 <%= render_step('release/checks') %>
 

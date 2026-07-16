@@ -227,6 +227,7 @@ jobs:
           #     github_release: ${{ needs.configure.outputs.github_release }}
           github_release: 'false'
           gem_name: bt-publishing-test
+          version: ${{ needs.configure.outputs.version }}   # for the registry availability check
           label: bt-publishing-test
           notes: ${{ needs.prepare.outputs.notes }}
           prev_release: ${{ needs.configure.outputs.prev_release }}

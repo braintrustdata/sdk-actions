@@ -144,12 +144,20 @@ runs:
         ACTOR: ${{ github.actor }}
       run: |
         set -euo pipefail
+        # A package is "skipped" when it has registries and ALL of them are already published.
+        SKIPPED_FILTER='(.registries // {}) as $r | (($r | length) > 0) and (all($r[]; .already_published == true))'
+        SKIPPED_LABELS="$(jq -r "[.packages[]? | select($SKIPPED_FILTER) | (.label // .tag // \"package\")] | join(\", \")" <<<"$MANIFEST_JSON")"
         {
           echo "## $SUBJECT"
           echo ""
           if [ "$DRY_RUN" = "true" ]; then
             echo "> [!NOTE]"
             echo "> Dry run: Nothing will be tagged or published."
+            echo ""
+          fi
+          if [ -n "$SKIPPED_LABELS" ]; then
+            echo "> [!WARNING]"
+            echo "> Already published — will be SKIPPED (not re-published): $SKIPPED_LABELS"
             echo ""
           fi
           if [ "$ON_RELEASE_BRANCH" = "false" ]; then
@@ -168,25 +176,36 @@ runs:
 
         while IFS= read -r encoded; do
           p="$(printf '%s' "$encoded" | base64 -d)"
-          label="$(jq -r '.label // .name // .tag // ""' <<<"$p")"
-          tag="$(jq -r 'if .tag and .tag != "" then .tag elif .name then "\(.name)@\(.version)" else "" end' <<<"$p")"
+          label="$(jq -r '.label // .tag // ""' <<<"$p")"
+          tag="$(jq -r '.tag // ""' <<<"$p")"
           emoji="$(jq -r --arg d "$DEFAULT_EMOJI" '.emoji // $d' <<<"$p")"
-          prev="$(jq -r '.prev_release // ""' <<<"$p")"
-          notes_b64="$(jq -r '.notes // ""' <<<"$p")"
-          if [ -n "$notes_b64" ]; then
-            NOTES="$(printf '%s' "$notes_b64" | base64 -d 2>/dev/null || true)"
+          skipped="$(jq -r "$SKIPPED_FILTER" <<<"$p")"
+          if [ "$skipped" = "true" ]; then
+            # Simplified: this version is already published, so it will NOT be published.
+            {
+              echo "### ⏭️ $label${tag:+ $tag} — already published, will NOT be published"
+              jq -r '.registries | to_entries[]
+                | "- **\(.key):** \(.value.name // "")\((.value.version // "") | if . != "" then " " + . else "" end)\((.value.version_url // "") | if . != "" then " — [published](" + . + ")" else "" end)"' <<<"$p"
+              echo ""
+            } >> "$GITHUB_STEP_SUMMARY"
           else
-            NOTES="$(jq -r '.release_body // ""' <<<"$p")"
-          fi
-          {
-            echo "### $emoji $label${tag:+ $tag}"
-            if [ -n "$prev" ]; then
-              echo "**Diff:** [${prev}...${tag:-$SHA}]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/${prev}...${SHA})"
+            prev="$(jq -r '.prev_release // ""' <<<"$p")"
+            notes_b64="$(jq -r '.notes // ""' <<<"$p")"
+            if [ -n "$notes_b64" ]; then
+              NOTES="$(printf '%s' "$notes_b64" | base64 -d 2>/dev/null || true)"
+            else
+              NOTES="$(jq -r '.release_body // ""' <<<"$p")"
             fi
-            echo ""
-            echo "${NOTES:-_Release notes unavailable._}"
-            echo ""
-          } >> "$GITHUB_STEP_SUMMARY"
+            {
+              echo "### $emoji $label${tag:+ $tag}"
+              if [ -n "$prev" ]; then
+                echo "**Diff:** [${prev}...${tag:-$SHA}]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/${prev}...${SHA})"
+              fi
+              echo ""
+              echo "${NOTES:-_Release notes unavailable._}"
+              echo ""
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
         done < <(jq -r '.packages[]? | @base64' <<<"$MANIFEST_JSON")
 
     - name: Build pending message
@@ -205,6 +224,7 @@ runs:
         ACTOR_LINK: <${{ github.server_url }}/${{ github.actor }}|${{ github.actor }}>
       run: |
         set -euo pipefail
+        SKIPPED_FILTER='(.registries // {}) as $r | (($r | length) > 0) and (all($r[]; .already_published == true))'
         BRANCH_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/tree/$BRANCH"
         BRANCH_LINK="<$BRANCH_URL|$BRANCH>"
         if [ "$ON_RELEASE_BRANCH" = "false" ]; then
@@ -218,23 +238,33 @@ runs:
         if [ "$DRY_RUN" = "true" ]; then
           TEXT="$TEXT\n> :information_source: _Dry run: nothing will be tagged or published._"
         fi
+        SKIPPED_LABELS="$(jq -r "[.packages[]? | select($SKIPPED_FILTER) | (.label // .tag // \"package\")] | join(\", \")" <<<"$MANIFEST_JSON")"
+        [ -n "$SKIPPED_LABELS" ] && TEXT="$TEXT\n> ⚠️ Already published, will be SKIPPED: $SKIPPED_LABELS"
         TEXT="$TEXT\n${BRANCH_INFO}"
 
         while IFS= read -r encoded; do
           p="$(printf '%s' "$encoded" | base64 -d)"
-          label="$(jq -r '.label // .name // .tag // ""' <<<"$p")"
-          tag="$(jq -r 'if .tag and .tag != "" then .tag elif .name then "\(.name)@\(.version)" else "" end' <<<"$p")"
+          label="$(jq -r '.label // .tag // ""' <<<"$p")"
+          tag="$(jq -r '.tag // ""' <<<"$p")"
           emoji="$(jq -r --arg d "$DEFAULT_EMOJI" '.emoji // $d' <<<"$p")"
-          prev="$(jq -r '.prev_release // ""' <<<"$p")"
-          pr_raw="$(jq -r '.pr_list // ""' <<<"$p")"
-          LINE="$emoji *$label${tag:+ $tag}*"
-          if [ -n "$prev" ]; then
-            DIFF_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/${prev}...${SHA}"
-            LINE="$LINE · <$DIFF_URL|${prev}...${tag:-$SHA}>"
+          skipped="$(jq -r "$SKIPPED_FILTER" <<<"$p")"
+          if [ "$skipped" = "true" ]; then
+            LINE="⏭️ *$label${tag:+ $tag}* — already published, will NOT be published"
+            REG="$(jq -r '[.registries | to_entries[] | if (.value.version_url // "") != "" then "<\(.value.version_url)|\(.key)>" else .key end] | join(", ")' <<<"$p")"
+            [ -n "$REG" ] && LINE="$LINE · $REG"
+            TEXT="$TEXT\n$LINE"
+          else
+            prev="$(jq -r '.prev_release // ""' <<<"$p")"
+            pr_raw="$(jq -r '.pr_list // ""' <<<"$p")"
+            LINE="$emoji *$label${tag:+ $tag}*"
+            if [ -n "$prev" ]; then
+              DIFF_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/${prev}...${SHA}"
+              LINE="$LINE · <$DIFF_URL|${prev}...${tag:-$SHA}>"
+            fi
+            TEXT="$TEXT\n$LINE"
+            PR_LIST="$(printf '%s' "$pr_raw" | tr $'\x1f' '\n' | sed '/^$/d')"
+            [ -n "$PR_LIST" ] && TEXT="$TEXT\n$PR_LIST"
           fi
-          TEXT="$TEXT\n$LINE"
-          PR_LIST="$(printf '%s' "$pr_raw" | tr $'\x1f' '\n' | sed '/^$/d')"
-          [ -n "$PR_LIST" ] && TEXT="$TEXT\n$PR_LIST"
         done < <(jq -r '.packages[]? | @base64' <<<"$MANIFEST_JSON")
 
         if [ -n "$SLACK_MENTION" ]; then

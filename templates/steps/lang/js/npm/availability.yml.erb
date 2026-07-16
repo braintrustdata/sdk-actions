@@ -1,21 +1,30 @@
 <%#
-  Fails fast if the package version is already published to the npm registry.
-  Read-only registry HTTP query — no auth, and no package-manager CLI, so it works
-  in pnpm-strict repos (a `npm view` here trips devEngines/engines with
-  EBADDEVENGINES, and swallowing that error silently passes the check). Self-guards:
-  skips when package_name is empty. Complements release/validate's git-tag check by
-  covering prereleases, which aren't tagged. Assumes the read-version step
-  (id: read-version) has run.
+  Checks whether the package version is already published to the npm registry and
+  exports `already_published` (true|false). Read-only registry HTTP query — no auth,
+  and no package-manager CLI, so it works in pnpm-strict repos (a `npm view` here trips
+  devEngines/engines with EBADDEVENGINES, and swallowing that error silently passes the
+  check). This is the SINGLE registry-existence check shared by validate (pre-gate) and
+  ship (at publish time), so the two never drift. Self-guards: skips when package_name
+  is empty. An unexpected HTTP status aborts — we never guess.
 
-  @param package_name [String] expr for the npm package name. Default: ${{ inputs.package_name }}
-  @param registry     [String] expr for the npm registry URL. Default: ${{ inputs.registry }}
+  `severity` controls what happens when the version IS already published:
+    fail (default) → error + abort · warn → warning + continue · off → just report.
+  `already_published` is set regardless (unless self-guarded/aborted), for the caller
+  to consume (validate exposes it; ship gates the publish step on it).
+
+  @param package_name [String] expr for the npm package name.         Default: ${{ inputs.package_name }}
+  @param version      [String] expr for the version to check.         Default: ${{ steps.read-version.outputs.version }}
+  @param registry     [String] expr for the npm registry URL.         Default: ${{ inputs.registry }}
+  @param severity     [String] fail | warn | off.                     Default: fail
 -%>
 - name: Check npm version availability
+  id: version-check
   shell: bash
   env:
     PACKAGE_NAME: <%= locals.fetch(:package_name) { "${{ inputs.package_name }}" } %>
-    VERSION: ${{ steps.read-version.outputs.version }}
+    VERSION: <%= locals.fetch(:version) { "${{ steps.read-version.outputs.version }}" } %>
     REGISTRY: <%= locals.fetch(:registry) { "${{ inputs.registry }}" } %>
+    SEVERITY: <%= locals.fetch(:severity) { "fail" } %>
   run: |
     if [ -z "$PACKAGE_NAME" ]; then
       echo "No package_name provided; skipping npm availability check."
@@ -27,10 +36,18 @@
       "$REGISTRY/$PACKAGE_NAME/$VERSION")
     case "$CODE" in
       200)
-        echo "::error title=Version already published::$PACKAGE_NAME@$VERSION already exists on npm — has the version been bumped?"
-        exit 1
+        echo "already_published=true" >> "$GITHUB_OUTPUT"
+        if [ "$SEVERITY" = "off" ]; then
+          echo "$PACKAGE_NAME@$VERSION is already on npm."
+        elif [ "$SEVERITY" = "warn" ]; then
+          echo "::warning title=Already published::$PACKAGE_NAME@$VERSION is already on npm."
+        else
+          echo "::error title=Version already published::$PACKAGE_NAME@$VERSION already exists on npm — has the version been bumped?"
+          exit 1
+        fi
         ;;
       404)
+        echo "already_published=false" >> "$GITHUB_OUTPUT"
         echo "$PACKAGE_NAME@$VERSION is available on npm."
         ;;
       *)

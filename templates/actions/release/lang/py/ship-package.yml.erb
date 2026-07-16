@@ -109,7 +109,12 @@ runs:
       if:        "${{ inputs.dry_run != 'true' }}",
       artifacts: "${{ inputs.working_directory }}/dist/*.whl ${{ inputs.working_directory }}/dist/*.tar.gz") %>
 
-<%= render_step('lang/py/pypi/publish') %>
+<%# Idempotency: the SAME registry check validate uses (id: version-check), so ship never
+    drifts from validate's answer. Gates the publish below. -%>
+<%= render_step('lang/py/pypi/availability', severity: 'off', version: "${{ inputs.version }}") %>
+
+<%= render_step('lang/py/pypi/publish',
+      if: "${{ steps.version-check.outputs.already_published != 'true' }}") %>
 
 <%= render_step('release/create-github-release') %>
 

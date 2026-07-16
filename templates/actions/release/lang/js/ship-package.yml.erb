@@ -125,7 +125,14 @@ runs:
 
 <%= render_step('lang/js/npm/setup') %>
 
-<%= render_step('lang/js/npm/publish-package', tarball: "${{ inputs.tarball }}") %>
+<%# Idempotency: the SAME registry check validate uses (id: version-check), so ship never
+    drifts from validate's answer. Gates the publish below — an already-published version
+    is skipped (the step shows as skipped). -%>
+<%= render_step('lang/js/npm/availability', severity: 'off', version: "${{ inputs.version }}") %>
+
+<%= render_step('lang/js/npm/publish-package',
+      if:      "${{ steps.version-check.outputs.already_published != 'true' }}",
+      tarball: "${{ inputs.tarball }}") %>
 
 <%= render_step('release/create-github-release') %>
 

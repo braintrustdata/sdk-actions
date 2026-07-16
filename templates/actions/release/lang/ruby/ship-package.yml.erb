@@ -37,6 +37,10 @@ inputs:
     description: "RubyGems gem name — used to build the RubyGems link in notifications"
     required: false
     default: ''
+  version:
+    description: "Gem version being released — used for the registry availability check."
+    required: false
+    default: ''
   label:
     description: "Display name for release notifications (e.g. the gem name)."
     required: false
@@ -93,6 +97,11 @@ runs:
 <%= render_step('release/verify-package',
       if:        "${{ inputs.dry_run != 'true' }}",
       artifacts: "${{ inputs.working_directory }}/*.gem") %>
+
+<%# Idempotency: the SAME registry check validate uses (id: version-check), so ship never
+    drifts from validate's answer. The push step self-gates on its output. -%>
+<%= render_step('lang/ruby/rubygems/availability', severity: 'off',
+      package_name: "${{ inputs.gem_name }}", version: "${{ inputs.version }}") %>
 
 <%= render_step('lang/ruby/rubygems/push', gem: "*.gem") %>
 

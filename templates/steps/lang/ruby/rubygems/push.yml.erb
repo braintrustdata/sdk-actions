@@ -5,12 +5,18 @@
   environment if gated). Shared by turnkey build-and-ship and custom ship-package; only
   the gem's location differs.
 
+  Idempotency (present → skip) is handled by the caller: ship renders the shared
+  lang/ruby/rubygems/availability check and gates this step with `if: !already_published`.
+
   @param gem [String] gem glob, relative to working_directory. Default: pkg/*.gem
 -%>
 - name: Configure RubyGems credentials (OIDC trusted publishing)
   if: ${{ inputs.dry_run != 'true' }}
   uses: rubygems/configure-rubygems-credentials@dc5a8d8553e6ee01fc26761a49e99e733d17954a # v2.1.0
 - name: Push gem to RubyGems
+  # Idempotency: skipped when ship's shared availability check (id: version-check) found the
+  # version already on RubyGems. Empty (no such step, e.g. turnkey) → runs.
+  if: ${{ steps.version-check.outputs.already_published != 'true' }}
   shell: bash
   working-directory: ${{ inputs.working_directory }}
   env:

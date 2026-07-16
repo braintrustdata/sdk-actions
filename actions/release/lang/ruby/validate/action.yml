@@ -72,7 +72,11 @@ inputs:
     required: false
     default: 'true'
   check_version_unpublished:
-    description: "Fail if the version is already published to RubyGems"
+    description: >
+      Policy when the target version is already published to RubyGems: 'true' (default)
+      fails, 'warn' logs a warning and continues, 'false' skips the check. Use 'warn'
+      in multi-package repos so a heal re-run isn't aborted — the exposed
+      `already_published` output then drives the approval notice + ship skip.
     required: false
     default: 'true'
   check_notes_not_blank:
@@ -83,6 +87,11 @@ inputs:
     description: "Hard-fail (instead of warn) when the SHA is off the release branch"
     required: false
     default: 'false'
+
+outputs:
+  already_published:
+    description: "Whether the target version is already published to the registry (from the availability check)."
+    value: ${{ steps.version-check.outputs.already_published }}
 
 runs:
   using: composite
@@ -119,11 +128,13 @@ runs:
         echo "version=$VERSION" >> $GITHUB_OUTPUT
 
     - name: Check RubyGems version availability
-      if: ${{ inputs.check_version_unpublished == 'true' }}
+      if: ${{ inputs.check_version_unpublished != 'false' }}
+      id: version-check
       shell: bash
       env:
         PACKAGE_NAME: ${{ inputs.package_name }}
         VERSION: ${{ steps.read-version.outputs.version }}
+        SEVERITY: ${{ inputs.check_version_unpublished }}
       run: |
         if [ -z "$PACKAGE_NAME" ]; then
           echo "No package_name provided; skipping RubyGems availability check."
@@ -134,10 +145,18 @@ runs:
           "https://rubygems.org/api/v2/rubygems/$PACKAGE_NAME/versions/$VERSION.json")
         case "$CODE" in
           200)
-            echo "::error title=Version already published::$PACKAGE_NAME $VERSION already exists on RubyGems — has the version been bumped?"
-            exit 1
+            echo "already_published=true" >> "$GITHUB_OUTPUT"
+            if [ "$SEVERITY" = "off" ]; then
+              echo "$PACKAGE_NAME $VERSION is already on RubyGems."
+            elif [ "$SEVERITY" = "warn" ]; then
+              echo "::warning title=Already published::$PACKAGE_NAME $VERSION is already on RubyGems."
+            else
+              echo "::error title=Version already published::$PACKAGE_NAME $VERSION already exists on RubyGems — has the version been bumped?"
+              exit 1
+            fi
             ;;
           404)
+            echo "already_published=false" >> "$GITHUB_OUTPUT"
             echo "$PACKAGE_NAME $VERSION is available on RubyGems."
             ;;
           *)

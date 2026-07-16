@@ -100,6 +100,10 @@ runs:
       uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9 # v7.2.0
       with:
         python-version: '3.13'
+        # No dependency install here (we only upload prebuilt dist/ artifacts), and this runs in the
+        # downloaded-artifact dir with no pyproject.toml/uv.lock — so leave the cache off, otherwise
+        # setup-uv's post-job save-cache errors on the missing cache path and fails the job.
+        enable-cache: "false"
 
 <%= render_step('release/verify-package',
       if:        "${{ inputs.dry_run != 'true' }}",

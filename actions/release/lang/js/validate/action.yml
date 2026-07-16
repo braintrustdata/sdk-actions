@@ -267,11 +267,12 @@ runs:
       shell: bash
       working-directory: ${{ inputs.working_directory }}
       run: |
-        if ! pnpm sbom --help >/dev/null 2>&1; then
+        PNPM="${PACK_PNPM:-pnpm}"
+        if ! $PNPM sbom --help >/dev/null 2>&1; then
           echo "::error title=pnpm sbom unavailable::'pnpm sbom' needs pnpm >= 11.8. Set the package's packageManager (or pnpm_version) to >= 11.8."
           exit 1
         fi
-        pnpm sbom --sbom-format cyclonedx --prod --out sbom.json
+        $PNPM sbom --sbom-format cyclonedx --prod --out sbom.json
         echo "Wrote $(pwd)/sbom.json"
 
     - name: Dump JavaScript environment

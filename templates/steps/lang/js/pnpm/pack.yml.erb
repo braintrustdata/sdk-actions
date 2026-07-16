@@ -6,8 +6,12 @@
   artifact we attest AND the artifact ship-package publishes. Sets id: pack with a
   `tarball` (absolute path) and `integrity` (sha512) output.
 
-  @param working_directory [String] expr for the package root. Default: ${{ inputs.working_directory }}
-  @param pack_dir          [String] expr for the (clean) output dir. Default: ${{ runner.temp }}/pkgout
+  Runs via ${PACK_PNPM:-pnpm}: the "Resolve packaging pnpm" step sets PACK_PNPM to a
+  pnpm ≥ 11.8 (the project's own, or a pinned fallback via corepack when it is older).
+  When unset, plain `pnpm` is used, so callers that don't resolve are unaffected.
+
+  @param working_directory  [String] expr for the package root. Default: ${{ inputs.working_directory }}
+  @param pack_dir           [String] expr for the (clean) output dir. Default: ${{ runner.temp }}/pkgout
 -%>
 - name: Pack
   id: pack
@@ -17,7 +21,7 @@
     PACK_DIR: <%= locals.fetch(:pack_dir) { "${{ runner.temp }}/pkgout" } %>
   run: |
     rm -rf "$PACK_DIR"; mkdir -p "$PACK_DIR"
-    pnpm pack --pack-destination "$PACK_DIR" >/dev/null
+    ${PACK_PNPM:-pnpm} pack --pack-destination "$PACK_DIR" >/dev/null
     TGZ=$(ls "$PACK_DIR"/*.tgz)
     echo "tarball=$TGZ" >> "$GITHUB_OUTPUT"
     echo "integrity=sha512-$(openssl dgst -sha512 -binary "$TGZ" | openssl base64 -A)" >> "$GITHUB_OUTPUT"

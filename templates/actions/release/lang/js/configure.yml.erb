@@ -137,6 +137,7 @@ runs:
 <%= render_step('lang/js/npm/availability',
       package_name: "${{ inputs.npm_package_name }}",
       version:      "${{ steps.read-version.outputs.version }}",
+      registry:     "${{ inputs.npm_registry }}",
       severity:     'off') %>
 
 <%# Fact: release notes + PR list (needs contents: write on the job). -%>

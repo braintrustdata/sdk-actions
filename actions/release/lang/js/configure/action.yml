@@ -206,7 +206,7 @@ runs:
       env:
         PACKAGE_NAME: ${{ inputs.npm_package_name }}
         VERSION: ${{ steps.read-version.outputs.version }}
-        REGISTRY: ${{ inputs.registry }}
+        REGISTRY: ${{ inputs.npm_registry }}
         SEVERITY: off
       run: |
         if [ -z "$PACKAGE_NAME" ]; then

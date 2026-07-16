@@ -109,6 +109,10 @@ inputs:
     description: "npm package name — used to build the npm link in notifications"
     required: false
     default: ''
+  already_published:
+    description: "Whether the version is already on npm (from configure). When 'true', the publish is skipped."
+    required: false
+    default: ''
   label:
     description: >
       Display name for release notifications (e.g. the package name). When set, it
@@ -231,6 +235,7 @@ runs:
         sbom-path: ${{ inputs.working_directory }}/sbom.json
 
     - name: Publish to npm
+      if: ${{ inputs.already_published != 'true' }}
       shell: bash
       working-directory: ${{ inputs.working_directory }}
       env:
@@ -326,7 +331,7 @@ runs:
         BRANCH: ${{ inputs.branch }}
         ON_RELEASE_BRANCH: ${{ inputs.on_release_branch }}
         DRY_RUN: ${{ inputs.dry_run }}
-        ALREADY_PUBLISHED: ${{ steps.version-check.outputs.already_published }}
+        ALREADY_PUBLISHED: ${{ inputs.already_published }}
         LINKS_JSON: ${{ steps.links.outputs.links }}
         RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
       run: |
@@ -394,7 +399,7 @@ runs:
         ON_RELEASE_BRANCH: ${{ inputs.on_release_branch }}
         PREV_RELEASE: ${{ inputs.prev_release }}
         DRY_RUN: ${{ inputs.dry_run }}
-        ALREADY_PUBLISHED: ${{ steps.version-check.outputs.already_published }}
+        ALREADY_PUBLISHED: ${{ inputs.already_published }}
         SLACK_MENTION: ${{ inputs.slack_mention }}
         LINKS_JSON: ${{ steps.links.outputs.links }}
         RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

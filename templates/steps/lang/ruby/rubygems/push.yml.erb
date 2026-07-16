@@ -14,9 +14,9 @@
   if: ${{ inputs.dry_run != 'true' }}
   uses: rubygems/configure-rubygems-credentials@dc5a8d8553e6ee01fc26761a49e99e733d17954a # v2.1.0
 - name: Push gem to RubyGems
-  # Idempotency: skipped when ship's shared availability check (id: version-check) found the
-  # version already on RubyGems. Empty (no such step, e.g. turnkey) → runs.
-  if: ${{ steps.version-check.outputs.already_published != 'true' }}
+  # Idempotency: skipped when the caller's already_published fact is 'true' (from configure).
+  # Empty (turnkey, no such fact) → runs.
+  if: ${{ inputs.already_published != 'true' }}
   shell: bash
   working-directory: ${{ inputs.working_directory }}
   env:

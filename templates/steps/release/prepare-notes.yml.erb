@@ -1,0 +1,48 @@
+<%#
+  Fetches release notes + formats the PR list via the GitHub `generate-notes` API.
+  Requires contents: write on the calling job. Sets id: fetch with `pr_list`
+  (x1f-delimited, safe for job outputs) and `notes` (base64) outputs. When prev_release
+  is a full SHA, notes are unavailable (no reliable cross-strategy PR extraction) and the
+  outputs are empty.
+
+  @param release_tag  [String] expr for the release tag.   Default: ${{ inputs.release_tag }}
+  @param sha          [String] expr for the commit SHA.    Default: ${{ inputs.sha }}
+  @param prev_release [String] expr for the notes anchor.  Default: ${{ inputs.prev_release }}
+-%>
+- name: Fetch PR list and release notes
+  id: fetch
+  shell: bash
+  env:
+    GH_TOKEN: ${{ github.token }}
+    RELEASE_TAG: <%= locals.fetch(:release_tag) { "${{ inputs.release_tag }}" } %>
+    SHA: <%= locals.fetch(:sha) { "${{ inputs.sha }}" } %>
+    PREV_RELEASE: <%= locals.fetch(:prev_release) { "${{ inputs.prev_release }}" } %>
+  run: |
+    # If prev_release is a full SHA, notes are unavailable.
+    if echo "$PREV_RELEASE" | grep -qE '^[0-9a-f]{40}$'; then
+      echo "SHA provided for prev_release — notes unavailable for SHA ranges."
+      echo "pr_list=" >> $GITHUB_OUTPUT
+      echo "notes=$(echo "" | base64 -w 0)" >> $GITHUB_OUTPUT
+      exit 0
+    fi
+
+    BODY=$(gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
+      --method POST \
+      --field tag_name="$RELEASE_TAG" \
+      --field target_commitish="$SHA" \
+      ${PREV_RELEASE:+--field previous_tag_name="$PREV_RELEASE"} \
+      --jq '.body' 2>/dev/null || echo "")
+
+    PR_LIST=$(echo "$BODY" \
+      | grep "^\* " \
+      | grep -v "made their first contribution" \
+      | grep -v "Full Changelog" \
+      | head -10 \
+      | sed 's|^\* ||' \
+      | sed 's| by @[^ ]*||' \
+      | sed 's@ in \(https://[^ ]*/pull/\([0-9]*\)\)@ (<\1|#\2>)@' \
+      | sed 's/^/• /' \
+      | tr '\n' $'\x1f' || echo "")
+
+    echo "pr_list=$PR_LIST" >> $GITHUB_OUTPUT
+    echo "notes=$(echo "$BODY" | base64 -w 0)" >> $GITHUB_OUTPUT

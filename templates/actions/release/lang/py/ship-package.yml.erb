@@ -49,6 +49,10 @@ inputs:
     description: "PyPI package name — used to build the PyPI link in notifications"
     required: false
     default: ''
+  already_published:
+    description: "Whether the version is already on PyPI (from configure). When 'true', the publish is skipped."
+    required: false
+    default: ''
   label:
     description: "Display name for release notifications (e.g. the package name)."
     required: false
@@ -109,12 +113,9 @@ runs:
       if:        "${{ inputs.dry_run != 'true' }}",
       artifacts: "${{ inputs.working_directory }}/dist/*.whl ${{ inputs.working_directory }}/dist/*.tar.gz") %>
 
-<%# Idempotency: the SAME registry check validate uses (id: version-check), so ship never
-    drifts from validate's answer. Gates the publish below. -%>
-<%= render_step('lang/py/pypi/availability', severity: 'off', version: "${{ inputs.version }}") %>
-
+<%# Idempotency: gate the publish on configure's already_published fact (no re-query in ship). -%>
 <%= render_step('lang/py/pypi/publish',
-      if: "${{ steps.version-check.outputs.already_published != 'true' }}") %>
+      if: "${{ inputs.already_published != 'true' }}") %>
 
 <%= render_step('release/create-github-release') %>
 

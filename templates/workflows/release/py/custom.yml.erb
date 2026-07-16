@@ -58,11 +58,13 @@ on:
         default: false
 
 jobs:
+  # FACT-FIND — derive version/tag/notes, check the registry, and emit the package manifest.
+  # contents: write is for the releases/generate-notes API.
   configure:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
-      contents: read
+      contents: write
     outputs:
       version: ${{ steps.configure.outputs.version }}
       release_tag: ${{ steps.configure.outputs.release_tag }}
@@ -71,6 +73,9 @@ jobs:
       on_release_branch: ${{ steps.configure.outputs.on_release_branch }}
       commit_message: ${{ steps.configure.outputs.commit_message }}
       github_release: ${{ steps.configure.outputs.github_release }}
+      already_published: ${{ steps.configure.outputs.already_published }}
+      notes: ${{ steps.configure.outputs.notes }}
+      package: ${{ steps.configure.outputs.package }}
     steps:
       - name: Configure release
         id: configure
@@ -80,27 +85,13 @@ jobs:
           sha: ${{ inputs.sha }}
           working_directory: <%= working_directory %>
           release_type: ${{ inputs.release_type }}
-
-  prepare:
-    needs: configure
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions:
-      contents: write  # releases/generate-notes API
-    outputs:
-      pr_list: ${{ steps.prepare.outputs.pr_list }}
-      notes: ${{ steps.prepare.outputs.notes }}
-    steps:
-      - name: Prepare release
-        id: prepare
-        uses: braintrustdata/sdk-actions/actions/release/prepare@<%= ref %>
-        with:
-          release_tag: ${{ needs.configure.outputs.release_tag }}
-          sha: ${{ inputs.sha }}
-          prev_release: ${{ inputs.prev_release || needs.configure.outputs.prev_release }}
+          pypi_package_name: <%= package_name %>
+          package_label: <%= package_name %>
+          emoji: '<%= emoji %>'
+          prev_release: ${{ inputs.prev_release }}
 
   validate:
-    needs: [configure, prepare]
+    needs: [configure]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -109,21 +100,20 @@ jobs:
       - name: Validate release
         uses: braintrustdata/sdk-actions/actions/release/lang/py/validate@<%= ref %>
         with:
-          version: ${{ needs.configure.outputs.version }}
           sha: ${{ inputs.sha }}
           dry_run: ${{ inputs.dry_run }}
           working_directory: <%= working_directory %>
           python_version: <%= python_version %>
-          package_name: <%= package_name %>
           release_tag: ${{ needs.configure.outputs.release_tag }}
           on_release_branch: ${{ needs.configure.outputs.on_release_branch }}
-          notes: ${{ needs.prepare.outputs.notes }}
+          notes: ${{ needs.configure.outputs.notes }}
+          already_published: ${{ needs.configure.outputs.already_published }}
           build: 'false'   # the pack job owns the build
           sbom: 'false'    # the pack job generates + attests the SBOM
 
   # BUILD side — unprivileged: builds + attests dist/, NO publish credentials.
   pack:
-    needs: [configure, prepare, validate]
+    needs: [configure, validate]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -154,7 +144,7 @@ jobs:
           if-no-files-found: error
 
   request-approval:
-    needs: [configure, prepare, pack]
+    needs: [configure, validate, pack]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions: {}
@@ -162,23 +152,18 @@ jobs:
       - name: Request release approval
         uses: braintrustdata/sdk-actions/actions/release/request-approval@<%= ref %>
         with:
+          packages: '[${{ needs.configure.outputs.package }}]'
           sha: ${{ inputs.sha }}
-          release_tag: ${{ needs.configure.outputs.release_tag }}
-          prev_release: ${{ needs.configure.outputs.prev_release }}
           branch: ${{ needs.configure.outputs.branch }}
           on_release_branch: ${{ needs.configure.outputs.on_release_branch }}
           commit_message: ${{ needs.configure.outputs.commit_message }}
-          pr_list: ${{ needs.prepare.outputs.pr_list }}
-          notes: ${{ needs.prepare.outputs.notes }}
           dry_run: ${{ inputs.dry_run }}
           slack_token: ${{ secrets.<%= slack_token_secret %> }}
           slack_channel: ${{ vars.<%= slack_channel_var %> }}
-          label: <%= package_name %>
-          emoji: '<%= emoji %>'
 
   # PUBLISH side — gated: verifies the attestation against the downloaded dists, then publishes them.
   ship-package:
-    needs: [configure, prepare, pack, request-approval]
+    needs: [configure, validate, pack, request-approval]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     environment: ${{ inputs.dry_run && '<%= dry_run_environment %>' || '<%= publish_environment %>' }}
@@ -200,15 +185,15 @@ jobs:
           sha: ${{ inputs.sha }}
           dry_run: ${{ inputs.dry_run }}
           release_tag: ${{ needs.configure.outputs.release_tag }}
+          already_published: ${{ needs.configure.outputs.already_published }}
           github_release: ${{ needs.configure.outputs.github_release }}
           version: ${{ needs.configure.outputs.version }}
           package_name: <%= package_name %>
           label: <%= package_name %>
-          notes: ${{ needs.prepare.outputs.notes }}
+          notes: ${{ needs.configure.outputs.notes }}
           prev_release: ${{ needs.configure.outputs.prev_release }}
           branch: ${{ needs.configure.outputs.branch }}
           on_release_branch: ${{ needs.configure.outputs.on_release_branch }}
-          pr_list: ${{ needs.prepare.outputs.pr_list }}
           slack_token: ${{ secrets.<%= slack_token_secret %> }}
           slack_channel: ${{ vars.<%= slack_channel_var %> }}
           emoji: '<%= emoji %>'

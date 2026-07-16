@@ -51,6 +51,10 @@ inputs:
     description: "PyPI package name — used to build the PyPI link in notifications"
     required: false
     default: ''
+  already_published:
+    description: "Whether the version is already on PyPI (from configure). When 'true', the publish is skipped."
+    required: false
+    default: ''
   label:
     description: "Display name for release notifications (e.g. the package name)."
     required: false
@@ -135,45 +139,8 @@ runs:
         done
         echo "✓ attestations verified for: ${FILES[*]}"
 
-    - name: Check PyPI version availability
-      id: version-check
-      shell: bash
-      env:
-        PACKAGE_NAME: ${{ inputs.package_name }}
-        VERSION: ${{ inputs.version }}
-        SEVERITY: off
-      run: |
-        if [ -z "$PACKAGE_NAME" ]; then
-          echo "No package_name provided; skipping PyPI availability check."
-          exit 0
-        fi
-        CODE=$(curl -sS -o /dev/null -w '%{http_code}' \
-          --retry 3 --retry-connrefused --max-time 30 \
-          "https://pypi.org/pypi/$PACKAGE_NAME/$VERSION/json")
-        case "$CODE" in
-          200)
-            echo "already_published=true" >> "$GITHUB_OUTPUT"
-            if [ "$SEVERITY" = "off" ]; then
-              echo "$PACKAGE_NAME $VERSION is already on PyPI."
-            elif [ "$SEVERITY" = "warn" ]; then
-              echo "::warning title=Already published::$PACKAGE_NAME $VERSION is already on PyPI."
-            else
-              echo "::error title=Version already published::$PACKAGE_NAME $VERSION already exists on PyPI — has the version been bumped?"
-              exit 1
-            fi
-            ;;
-          404)
-            echo "already_published=false" >> "$GITHUB_OUTPUT"
-            echo "$PACKAGE_NAME $VERSION is available on PyPI."
-            ;;
-          *)
-            echo "::error title=Registry check failed::unexpected response from PyPI (HTTP $CODE) checking $PACKAGE_NAME $VERSION — cannot confirm the version is unpublished; aborting rather than risk a bad release."
-            exit 1
-            ;;
-        esac
-
     - name: Publish to PyPI
-      if: ${{ steps.version-check.outputs.already_published != 'true' }}
+      if: ${{ inputs.already_published != 'true' }}
       shell: bash
       working-directory: ${{ inputs.working_directory }}
       env:
@@ -268,7 +235,7 @@ runs:
         BRANCH: ${{ inputs.branch }}
         ON_RELEASE_BRANCH: ${{ inputs.on_release_branch }}
         DRY_RUN: ${{ inputs.dry_run }}
-        ALREADY_PUBLISHED: ${{ steps.version-check.outputs.already_published }}
+        ALREADY_PUBLISHED: ${{ inputs.already_published }}
         LINKS_JSON: ${{ steps.links.outputs.links }}
         RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
       run: |
@@ -336,7 +303,7 @@ runs:
         ON_RELEASE_BRANCH: ${{ inputs.on_release_branch }}
         PREV_RELEASE: ${{ inputs.prev_release }}
         DRY_RUN: ${{ inputs.dry_run }}
-        ALREADY_PUBLISHED: ${{ steps.version-check.outputs.already_published }}
+        ALREADY_PUBLISHED: ${{ inputs.already_published }}
         SLACK_MENTION: ${{ inputs.slack_mention }}
         LINKS_JSON: ${{ steps.links.outputs.links }}
         RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

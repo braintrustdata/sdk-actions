@@ -30,6 +30,7 @@
       echo "No package_name provided; skipping npm availability check."
       exit 0
     fi
+    echo "version_url=https://www.npmjs.com/package/$PACKAGE_NAME/v/$VERSION" >> "$GITHUB_OUTPUT"
     REGISTRY="${REGISTRY%/}"
     CODE=$(curl -sS -o /dev/null -w '%{http_code}' \
       --retry 3 --retry-connrefused --max-time 30 \

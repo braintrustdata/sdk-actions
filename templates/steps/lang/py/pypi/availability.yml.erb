@@ -24,6 +24,7 @@
       echo "No package_name provided; skipping PyPI availability check."
       exit 0
     fi
+    echo "version_url=https://pypi.org/project/$PACKAGE_NAME/$VERSION/" >> "$GITHUB_OUTPUT"
     CODE=$(curl -sS -o /dev/null -w '%{http_code}' \
       --retry 3 --retry-connrefused --max-time 30 \
       "https://pypi.org/pypi/$PACKAGE_NAME/$VERSION/json")

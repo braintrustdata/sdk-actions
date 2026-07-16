@@ -38,7 +38,11 @@ inputs:
     required: false
     default: ''
   version:
-    description: "Gem version being released — used for the registry availability check."
+    description: "Gem version being released — used to build the RubyGems link in notifications."
+    required: false
+    default: ''
+  already_published:
+    description: "Whether the version is already on RubyGems (from configure). When 'true', the push is skipped."
     required: false
     default: ''
   label:
@@ -98,11 +102,7 @@ runs:
       if:        "${{ inputs.dry_run != 'true' }}",
       artifacts: "${{ inputs.working_directory }}/*.gem") %>
 
-<%# Idempotency: the SAME registry check validate uses (id: version-check), so ship never
-    drifts from validate's answer. The push step self-gates on its output. -%>
-<%= render_step('lang/ruby/rubygems/availability', severity: 'off',
-      package_name: "${{ inputs.gem_name }}", version: "${{ inputs.version }}") %>
-
+<%# Idempotency: the push step self-gates on configure's already_published fact (no re-query). -%>
 <%= render_step('lang/ruby/rubygems/push', gem: "*.gem") %>
 
 <%= render_step('release/create-github-release') %>

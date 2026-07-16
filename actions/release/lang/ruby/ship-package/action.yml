@@ -40,7 +40,11 @@ inputs:
     required: false
     default: ''
   version:
-    description: "Gem version being released — used for the registry availability check."
+    description: "Gem version being released — used to build the RubyGems link in notifications."
+    required: false
+    default: ''
+  already_published:
+    description: "Whether the version is already on RubyGems (from configure). When 'true', the push is skipped."
     required: false
     default: ''
   label:
@@ -124,50 +128,13 @@ runs:
         done
         echo "✓ attestations verified for: ${FILES[*]}"
 
-    - name: Check RubyGems version availability
-      id: version-check
-      shell: bash
-      env:
-        PACKAGE_NAME: ${{ inputs.gem_name }}
-        VERSION: ${{ inputs.version }}
-        SEVERITY: off
-      run: |
-        if [ -z "$PACKAGE_NAME" ]; then
-          echo "No package_name provided; skipping RubyGems availability check."
-          exit 0
-        fi
-        CODE=$(curl -sS -o /dev/null -w '%{http_code}' \
-          --retry 3 --retry-connrefused --max-time 30 \
-          "https://rubygems.org/api/v2/rubygems/$PACKAGE_NAME/versions/$VERSION.json")
-        case "$CODE" in
-          200)
-            echo "already_published=true" >> "$GITHUB_OUTPUT"
-            if [ "$SEVERITY" = "off" ]; then
-              echo "$PACKAGE_NAME $VERSION is already on RubyGems."
-            elif [ "$SEVERITY" = "warn" ]; then
-              echo "::warning title=Already published::$PACKAGE_NAME $VERSION is already on RubyGems."
-            else
-              echo "::error title=Version already published::$PACKAGE_NAME $VERSION already exists on RubyGems — has the version been bumped?"
-              exit 1
-            fi
-            ;;
-          404)
-            echo "already_published=false" >> "$GITHUB_OUTPUT"
-            echo "$PACKAGE_NAME $VERSION is available on RubyGems."
-            ;;
-          *)
-            echo "::error title=Registry check failed::unexpected response from RubyGems (HTTP $CODE) checking $PACKAGE_NAME $VERSION — cannot confirm the version is unpublished; aborting rather than risk a bad release."
-            exit 1
-            ;;
-        esac
-
     - name: Configure RubyGems credentials (OIDC trusted publishing)
       if: ${{ inputs.dry_run != 'true' }}
       uses: rubygems/configure-rubygems-credentials@dc5a8d8553e6ee01fc26761a49e99e733d17954a # v2.1.0
     - name: Push gem to RubyGems
-      # Idempotency: skipped when ship's shared availability check (id: version-check) found the
-      # version already on RubyGems. Empty (no such step, e.g. turnkey) → runs.
-      if: ${{ steps.version-check.outputs.already_published != 'true' }}
+      # Idempotency: skipped when the caller's already_published fact is 'true' (from configure).
+      # Empty (turnkey, no such fact) → runs.
+      if: ${{ inputs.already_published != 'true' }}
       shell: bash
       working-directory: ${{ inputs.working_directory }}
       env:
@@ -253,7 +220,7 @@ runs:
         BRANCH: ${{ inputs.branch }}
         ON_RELEASE_BRANCH: ${{ inputs.on_release_branch }}
         DRY_RUN: ${{ inputs.dry_run }}
-        ALREADY_PUBLISHED: ${{ steps.version-check.outputs.already_published }}
+        ALREADY_PUBLISHED: ${{ inputs.already_published }}
         LINKS_JSON: ${{ steps.links.outputs.links }}
         RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
       run: |
@@ -321,7 +288,7 @@ runs:
         ON_RELEASE_BRANCH: ${{ inputs.on_release_branch }}
         PREV_RELEASE: ${{ inputs.prev_release }}
         DRY_RUN: ${{ inputs.dry_run }}
-        ALREADY_PUBLISHED: ${{ steps.version-check.outputs.already_published }}
+        ALREADY_PUBLISHED: ${{ inputs.already_published }}
         SLACK_MENTION: ${{ inputs.slack_mention }}
         LINKS_JSON: ${{ steps.links.outputs.links }}
         RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

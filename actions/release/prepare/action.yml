@@ -37,9 +37,11 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
+        RELEASE_TAG: ${{ inputs.release_tag }}
+        SHA: ${{ inputs.sha }}
         PREV_RELEASE: ${{ inputs.prev_release }}
       run: |
-        # If prev_release is a full SHA, notes are unavailable
+        # If prev_release is a full SHA, notes are unavailable.
         if echo "$PREV_RELEASE" | grep -qE '^[0-9a-f]{40}$'; then
           echo "SHA provided for prev_release — notes unavailable for SHA ranges."
           echo "pr_list=" >> $GITHUB_OUTPUT
@@ -49,8 +51,8 @@ runs:
 
         BODY=$(gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
           --method POST \
-          --field tag_name="${{ inputs.release_tag }}" \
-          --field target_commitish="${{ inputs.sha }}" \
+          --field tag_name="$RELEASE_TAG" \
+          --field target_commitish="$SHA" \
           ${PREV_RELEASE:+--field previous_tag_name="$PREV_RELEASE"} \
           --jq '.body' 2>/dev/null || echo "")
 

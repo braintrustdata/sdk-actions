@@ -4,24 +4,17 @@ description: >
   (tag unused, version unpublished on PyPI, notes present, release branch) — and runs a
   pre-gate build + CycloneDX SBOM generation so build/SBOM-tooling failures surface
   BEFORE the approval gate. Read-only: nothing is signed or published here. Every check
-  is a boolean toggle (default on) with an escape hatch.
+  is a boolean toggle (default on) with an escape hatch. Consumes `configure`'s
+  `already_published` fact (does not query PyPI itself).
 
 inputs:
   sha:
     description: "Commit SHA being released"
     required: true
   dry_run:
-    description: "Warn instead of failing on an already-existing tag"
+    description: "Warn instead of failing on an already-existing tag / already-published version"
     required: false
     default: 'false'
-  version:
-    description: "Version override (from configure). If empty, read from version_file."
-    required: false
-    default: ''
-  version_file:
-    description: "Path (repo-root-relative) to a Python module exposing VERSION."
-    required: false
-    default: ''
   working_directory:
     description: "Path to the package root (where pyproject.toml lives)"
     required: false
@@ -31,12 +24,6 @@ inputs:
       Python version (e.g. 3.13), or a path to a version file
       (.python-version, .tool-versions) relative to the repo root.
     required: true
-  package_name:
-    description: >
-      PyPI package name. Used by the version-unpublished check (covers prereleases,
-      which aren't git-tagged). Leave empty to skip that check.
-    required: false
-    default: ''
   release_tag:
     description: "The release tag (from configure) — checked for prior existence"
     required: true
@@ -46,6 +33,10 @@ inputs:
     default: 'true'
   notes:
     description: "Base64-encoded release notes (from prepare) — checked non-blank"
+    required: false
+    default: ''
+  already_published:
+    description: "Whether the version is already on PyPI (from configure). Judged by check_version_unpublished."
     required: false
     default: ''
   build_command:
@@ -70,11 +61,7 @@ inputs:
     required: false
     default: 'true'
   check_version_unpublished:
-    description: >
-      Policy when the target version is already published to PyPI: 'true' (default)
-      fails, 'warn' logs a warning and continues, 'false' skips the check. Use 'warn'
-      in multi-package repos so a heal re-run isn't aborted — the exposed
-      `already_published` output then drives the approval notice + ship skip.
+    description: "Fail if the version is already published to PyPI (judges configure's already_published)"
     required: false
     default: 'true'
   check_notes_not_blank:
@@ -86,11 +73,6 @@ inputs:
     required: false
     default: 'false'
 
-outputs:
-  already_published:
-    description: "Whether the target version is already published to the registry (from the availability check)."
-    value: ${{ steps.version-check.outputs.already_published }}
-
 runs:
   using: composite
   steps:
@@ -100,12 +82,6 @@ runs:
         fetch-depth: 0
 
 <%= render_step('lang/py/setup') %>
-
-<%= render_step('lang/py/read-version') %>
-
-<%= render_step('lang/py/pypi/availability',
-      if:       "${{ inputs.check_version_unpublished != 'false' }}",
-      severity: "${{ inputs.check_version_unpublished }}") %>
 
 <%= render_step('release/checks') %>
 

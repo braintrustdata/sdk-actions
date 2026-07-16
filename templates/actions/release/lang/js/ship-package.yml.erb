@@ -71,6 +71,10 @@ inputs:
     description: "npm package name — used to build the npm link in notifications"
     required: false
     default: ''
+  already_published:
+    description: "Whether the version is already on npm (from configure). When 'true', the publish is skipped."
+    required: false
+    default: ''
   label:
     description: "Display name for release notifications (e.g. the package name)."
     required: false
@@ -125,13 +129,11 @@ runs:
 
 <%= render_step('lang/js/npm/setup') %>
 
-<%# Idempotency: the SAME registry check validate uses (id: version-check), so ship never
-    drifts from validate's answer. Gates the publish below — an already-published version
-    is skipped (the step shows as skipped). -%>
-<%= render_step('lang/js/npm/availability', severity: 'off', version: "${{ inputs.version }}") %>
-
+<%# Idempotency: gate the publish on the already_published FACT produced by configure (one
+    registry check, upstream — ship never re-queries, so it can't drift from validate/approval).
+    An already-published version is skipped (the step shows as skipped). -%>
 <%= render_step('lang/js/npm/publish-package',
-      if:      "${{ steps.version-check.outputs.already_published != 'true' }}",
+      if:      "${{ inputs.already_published != 'true' }}",
       tarball: "${{ inputs.tarball }}") %>
 
 <%= render_step('release/create-github-release') %>

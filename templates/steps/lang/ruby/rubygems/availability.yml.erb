@@ -26,6 +26,7 @@
       echo "No package_name provided; skipping RubyGems availability check."
       exit 0
     fi
+    echo "version_url=https://rubygems.org/gems/$PACKAGE_NAME/versions/$VERSION" >> "$GITHUB_OUTPUT"
     CODE=$(curl -sS -o /dev/null -w '%{http_code}' \
       --retry 3 --retry-connrefused --max-time 30 \
       "https://rubygems.org/api/v2/rubygems/$PACKAGE_NAME/versions/$VERSION.json")

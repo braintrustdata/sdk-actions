@@ -1,0 +1,79 @@
+<%#
+  Assembles ONE package manifest entry (compact JSON) from package-level facts +
+  per-registry facts (npm_/pypi_/rubygems_ prefixes). The single home of the package/
+  registry schema — rendered by build-package-manifest (standalone) AND by configure
+  (which emits its lane's manifest). Empties dropped; already_published → boolean;
+  version_url is carried in (the availability step is the single URL home). Sets id:
+  build with a `package` output.
+
+  All params default to empty — callers pass only what they have.
+  @param label,emoji,tag,prev_release,pr_list,notes,github_release  package-level
+  @param npm_name,npm_version,npm_channel,npm_version_url,npm_already_published        npm registry
+  @param pypi_name,pypi_version,pypi_version_url,pypi_already_published                 pypi registry
+  @param rubygems_name,rubygems_version,rubygems_version_url,rubygems_already_published rubygems registry
+-%>
+- name: Build package manifest entry
+  id: build
+  shell: bash
+  env:
+    LABEL: "<%= locals.fetch(:label) { "" } %>"
+    EMOJI: "<%= locals.fetch(:emoji) { "" } %>"
+    TAG: "<%= locals.fetch(:tag) { "" } %>"
+    PREV_RELEASE: "<%= locals.fetch(:prev_release) { "" } %>"
+    PR_LIST: "<%= locals.fetch(:pr_list) { "" } %>"
+    NOTES: "<%= locals.fetch(:notes) { "" } %>"
+    GITHUB_RELEASE: "<%= locals.fetch(:github_release) { "" } %>"
+    NPM_NAME: "<%= locals.fetch(:npm_name) { "" } %>"
+    NPM_VERSION: "<%= locals.fetch(:npm_version) { "" } %>"
+    NPM_CHANNEL: "<%= locals.fetch(:npm_channel) { "" } %>"
+    NPM_VERSION_URL: "<%= locals.fetch(:npm_version_url) { "" } %>"
+    NPM_ALREADY_PUBLISHED: "<%= locals.fetch(:npm_already_published) { "" } %>"
+    PYPI_NAME: "<%= locals.fetch(:pypi_name) { "" } %>"
+    PYPI_VERSION: "<%= locals.fetch(:pypi_version) { "" } %>"
+    PYPI_VERSION_URL: "<%= locals.fetch(:pypi_version_url) { "" } %>"
+    PYPI_ALREADY_PUBLISHED: "<%= locals.fetch(:pypi_already_published) { "" } %>"
+    RUBYGEMS_NAME: "<%= locals.fetch(:rubygems_name) { "" } %>"
+    RUBYGEMS_VERSION: "<%= locals.fetch(:rubygems_version) { "" } %>"
+    RUBYGEMS_VERSION_URL: "<%= locals.fetch(:rubygems_version_url) { "" } %>"
+    RUBYGEMS_ALREADY_PUBLISHED: "<%= locals.fetch(:rubygems_already_published) { "" } %>"
+  run: |
+    set -euo pipefail
+    if ! command -v jq >/dev/null 2>&1; then
+      echo "::error title=jq not found::build-manifest requires jq."
+      exit 1
+    fi
+
+    REGISTRIES='{}'
+    # Add one registry entry (keyed by id) when its name/version are given. version_url is
+    # carried in (from the availability check); empties dropped; already_published → boolean.
+    add_registry() {
+      local reg="$1" name="$2" version="$3" channel="$4" ap="$5" url="$6"
+      { [ -z "$name" ] && [ -z "$version" ]; } && return 0
+      local entry
+      entry="$(jq -nc \
+        --arg name "$name" --arg version "$version" --arg url "$url" \
+        --arg channel "$channel" --arg ap "$ap" \
+        '{name:$name, version:$version, version_url:$url, channel:$channel}
+         | with_entries(select(.value != ""))
+         | if $ap=="true" then .already_published=true
+           elif $ap=="false" then .already_published=false else . end')"
+      REGISTRIES="$(jq -c --arg r "$reg" --argjson e "$entry" '. + {($r): $e}' <<<"$REGISTRIES")"
+    }
+    add_registry npm      "$NPM_NAME"      "$NPM_VERSION"      "$NPM_CHANNEL" "$NPM_ALREADY_PUBLISHED"      "$NPM_VERSION_URL"
+    add_registry pypi     "$PYPI_NAME"     "$PYPI_VERSION"     ""            "$PYPI_ALREADY_PUBLISHED"     "$PYPI_VERSION_URL"
+    add_registry rubygems "$RUBYGEMS_NAME" "$RUBYGEMS_VERSION" ""            "$RUBYGEMS_ALREADY_PUBLISHED" "$RUBYGEMS_VERSION_URL"
+
+    # Package-level object; drop empties, then attach registries only when non-empty.
+    PACKAGE="$(jq -nc \
+      --arg label "$LABEL" --arg emoji "$EMOJI" --arg tag "$TAG" \
+      --arg prev_release "$PREV_RELEASE" --arg pr_list "$PR_LIST" --arg notes "$NOTES" \
+      --arg github_release "$GITHUB_RELEASE" \
+      '{label:$label, emoji:$emoji, tag:$tag, prev_release:$prev_release,
+        pr_list:$pr_list, notes:$notes, github_release:$github_release}
+       | with_entries(select(.value != ""))')"
+    if [ "$REGISTRIES" != "{}" ]; then
+      PACKAGE="$(jq -c --argjson r "$REGISTRIES" '. + {registries:$r}' <<<"$PACKAGE")"
+    fi
+
+    echo "package=$PACKAGE" >> "$GITHUB_OUTPUT"
+    echo "Built package manifest entry: $(jq -c '{keys:keys, registries:(.registries // {} | keys)}' <<<"$PACKAGE")"

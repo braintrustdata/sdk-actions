@@ -73,6 +73,10 @@ inputs:
     description: "npm package name — used to build the npm link in notifications"
     required: false
     default: ''
+  already_published:
+    description: "Whether the version is already on npm (from configure). When 'true', the publish is skipped."
+    required: false
+    default: ''
   label:
     description: "Display name for release notifications (e.g. the package name)."
     required: false
@@ -159,47 +163,8 @@ runs:
         NPM_VERSION: ${{ inputs.npm_version }}
       run: npm install -g "npm@$NPM_VERSION"
 
-    - name: Check npm version availability
-      id: version-check
-      shell: bash
-      env:
-        PACKAGE_NAME: ${{ inputs.package_name }}
-        VERSION: ${{ inputs.version }}
-        REGISTRY: ${{ inputs.registry }}
-        SEVERITY: off
-      run: |
-        if [ -z "$PACKAGE_NAME" ]; then
-          echo "No package_name provided; skipping npm availability check."
-          exit 0
-        fi
-        REGISTRY="${REGISTRY%/}"
-        CODE=$(curl -sS -o /dev/null -w '%{http_code}' \
-          --retry 3 --retry-connrefused --max-time 30 \
-          "$REGISTRY/$PACKAGE_NAME/$VERSION")
-        case "$CODE" in
-          200)
-            echo "already_published=true" >> "$GITHUB_OUTPUT"
-            if [ "$SEVERITY" = "off" ]; then
-              echo "$PACKAGE_NAME@$VERSION is already on npm."
-            elif [ "$SEVERITY" = "warn" ]; then
-              echo "::warning title=Already published::$PACKAGE_NAME@$VERSION is already on npm."
-            else
-              echo "::error title=Version already published::$PACKAGE_NAME@$VERSION already exists on npm — has the version been bumped?"
-              exit 1
-            fi
-            ;;
-          404)
-            echo "already_published=false" >> "$GITHUB_OUTPUT"
-            echo "$PACKAGE_NAME@$VERSION is available on npm."
-            ;;
-          *)
-            echo "::error title=Registry check failed::unexpected response from the npm registry (HTTP $CODE) checking $PACKAGE_NAME@$VERSION — cannot confirm the version is unpublished; aborting rather than risk a bad release."
-            exit 1
-            ;;
-        esac
-
     - name: Publish prebuilt tarball to npm
-      if: ${{ steps.version-check.outputs.already_published != 'true' }}
+      if: ${{ inputs.already_published != 'true' }}
       shell: bash
       env:
         TGZ: ${{ inputs.tarball }}
@@ -300,7 +265,7 @@ runs:
         BRANCH: ${{ inputs.branch }}
         ON_RELEASE_BRANCH: ${{ inputs.on_release_branch }}
         DRY_RUN: ${{ inputs.dry_run }}
-        ALREADY_PUBLISHED: ${{ steps.version-check.outputs.already_published }}
+        ALREADY_PUBLISHED: ${{ inputs.already_published }}
         LINKS_JSON: ${{ steps.links.outputs.links }}
         RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
       run: |
@@ -368,7 +333,7 @@ runs:
         ON_RELEASE_BRANCH: ${{ inputs.on_release_branch }}
         PREV_RELEASE: ${{ inputs.prev_release }}
         DRY_RUN: ${{ inputs.dry_run }}
-        ALREADY_PUBLISHED: ${{ steps.version-check.outputs.already_published }}
+        ALREADY_PUBLISHED: ${{ inputs.already_published }}
         SLACK_MENTION: ${{ inputs.slack_mention }}
         LINKS_JSON: ${{ steps.links.outputs.links }}
         RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

@@ -1,0 +1,33 @@
+name: Prepare Release
+description: >
+  Fetches release notes and formats the PR list for notifications.
+  Requires contents:write permission on the calling job (for generate-notes API).
+
+inputs:
+  release_tag:
+    description: "The release tag (e.g. v0.3.2)"
+    required: true
+  sha:
+    description: "The commit SHA being released"
+    required: true
+  prev_release:
+    description: >
+      Anchor for release notes. Accepts a tag name or a full commit SHA.
+      If a tag: generates notes via the GitHub API using it as the previous release.
+      If a SHA: notes are unavailable (no reliable cross-strategy PR extraction);
+      outputs will be empty. If omitted, GitHub auto-detects the previous release.
+    required: false
+    default: ''
+
+outputs:
+  pr_list:
+    description: "Formatted PR list (x1f-delimited for safe job output passing)"
+    value: ${{ steps.fetch.outputs.pr_list }}
+  notes:
+    description: "Base64-encoded full release notes body"
+    value: ${{ steps.fetch.outputs.notes }}
+
+runs:
+  using: composite
+  steps:
+<%= render_step('release/prepare-notes') %>

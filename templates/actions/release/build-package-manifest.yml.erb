@@ -1,0 +1,112 @@
+name: Build Package Manifest
+description: >
+  Formats one package's release facts into a single, well-formed package manifest entry
+  (compact JSON) via the shared release/build-manifest step. Multi-package workflows call
+  this once per package (label/emoji at the call site) and splice the entries into
+  request-approval's `packages`. Package-level facts (label, emoji, tag, prev_release,
+  pr_list, notes, github_release) + per-registry facts under a prefix (npm_/pypi_/
+  rubygems_) → nested `registries.<id>`; one call may carry several registries. Empties
+  dropped. `pr_list` (x1f) and `notes` (base64) are JSON-escaped, so entries splice into
+  a JSON array via GitHub expression interpolation with no further shell/jq.
+
+inputs:
+  label:
+    description: "Display label for notifications (defaults, downstream, to a registry name / tag)"
+    required: false
+    default: ''
+  emoji:
+    description: "Presentation emoji for notifications"
+    required: false
+    default: ''
+  tag:
+    description: "Release tag (e.g. js-1.2.3)"
+    required: false
+    default: ''
+  prev_release:
+    description: "Previous release tag (for the diff link)"
+    required: false
+    default: ''
+  pr_list:
+    description: "x1f-delimited PR list (from prepare)"
+    required: false
+    default: ''
+  notes:
+    description: "Base64-encoded release notes (from prepare)"
+    required: false
+    default: ''
+  github_release:
+    description: "Whether a GitHub release should be created for this package"
+    required: false
+    default: ''
+  npm_name:
+    description: "npm: package name (presence adds an npm registry entry)"
+    required: false
+    default: ''
+  npm_version:
+    description: "npm: version"
+    required: false
+    default: ''
+  npm_channel:
+    description: "npm: dist-tag / channel"
+    required: false
+    default: ''
+  npm_version_url:
+    description: "npm: human URL for the version (from validate/configure)"
+    required: false
+    default: ''
+  npm_already_published:
+    description: "npm: 'true'/'false' — is this version already on npm"
+    required: false
+    default: ''
+  pypi_name:
+    description: "PyPI: package name (presence adds a pypi registry entry)"
+    required: false
+    default: ''
+  pypi_version:
+    description: "PyPI: version"
+    required: false
+    default: ''
+  pypi_version_url:
+    description: "PyPI: human URL for the version"
+    required: false
+    default: ''
+  pypi_already_published:
+    description: "PyPI: 'true'/'false' — is this version already on PyPI"
+    required: false
+    default: ''
+  rubygems_name:
+    description: "RubyGems: gem name (presence adds a rubygems registry entry)"
+    required: false
+    default: ''
+  rubygems_version:
+    description: "RubyGems: version"
+    required: false
+    default: ''
+  rubygems_version_url:
+    description: "RubyGems: human URL for the version"
+    required: false
+    default: ''
+  rubygems_already_published:
+    description: "RubyGems: 'true'/'false' — is this version already on RubyGems"
+    required: false
+    default: ''
+
+outputs:
+  package:
+    description: "One package manifest entry as compact JSON (only the provided fields)"
+    value: ${{ steps.build.outputs.package }}
+
+runs:
+  using: composite
+  steps:
+<%= render_step('release/build-manifest',
+      label: "${{ inputs.label }}", emoji: "${{ inputs.emoji }}", tag: "${{ inputs.tag }}",
+      prev_release: "${{ inputs.prev_release }}", pr_list: "${{ inputs.pr_list }}",
+      notes: "${{ inputs.notes }}", github_release: "${{ inputs.github_release }}",
+      npm_name: "${{ inputs.npm_name }}", npm_version: "${{ inputs.npm_version }}",
+      npm_channel: "${{ inputs.npm_channel }}", npm_version_url: "${{ inputs.npm_version_url }}",
+      npm_already_published: "${{ inputs.npm_already_published }}",
+      pypi_name: "${{ inputs.pypi_name }}", pypi_version: "${{ inputs.pypi_version }}",
+      pypi_version_url: "${{ inputs.pypi_version_url }}", pypi_already_published: "${{ inputs.pypi_already_published }}",
+      rubygems_name: "${{ inputs.rubygems_name }}", rubygems_version: "${{ inputs.rubygems_version }}",
+      rubygems_version_url: "${{ inputs.rubygems_version_url }}", rubygems_already_published: "${{ inputs.rubygems_already_published }}") %>

@@ -2,13 +2,13 @@
 # sdk-actions: {"family":"release","version":"1.0.0"}
 name: Configure Python Release
 description: >
-  Derives release facts for a Python package — read-only, no token. Checks out the
-  SHA, sets up uv (with a default Python the action guarantees itself — no
-  python_version input) to read the version, and computes the release tag, the branch
-  (and whether it's a release branch), the commit message, the previous release tag,
-  and the github_release default from release_type. Its outputs feed validate,
-  request-approval, and build-and-ship. Judging/checks live in the validate action;
-  this action never fails on release state.
+  Produces the release FACTS for a Python package — the fact-finding half of the pipeline
+  (validate judges these; it never fails on release state). Checks out the SHA, sets up uv,
+  reads the version, computes the release tag/branch/commit/github_release, checks PyPI for
+  whether the version is already published (→ already_published + version_url), fetches
+  release notes + PR list, and assembles the package manifest. Requires contents: write on
+  the calling job (for the generate-notes API). Its outputs (incl. `package`) feed
+  validate, request-approval, and ship.
 
 inputs:
   sha:
@@ -48,6 +48,23 @@ inputs:
     description: "Comma-separated allowed release branch patterns (globs)."
     required: false
     default: 'main'
+  pypi_package_name:
+    description: "PyPI package name. Enables the availability check + the manifest's pypi registry entry."
+    required: false
+    default: ''
+  package_label:
+    description: "Display label raw material for notifications (presentation-agnostic; the renderer formats it)."
+    required: false
+    default: ''
+  emoji:
+    description: "Presentation emoji raw material for notifications."
+    required: false
+    default: ''
+  prev_release:
+    description: "Release-notes anchor override (tag or SHA). Empty → configure's derived previous tag."
+    required: false
+    default: ''
+
 outputs:
   version:
     description: "The resolved package version"
@@ -70,6 +87,21 @@ outputs:
   github_release:
     description: "Whether a GitHub release should be created"
     value: ${{ steps.configure.outputs.github_release }}
+  already_published:
+    description: "Whether the version is already published to PyPI"
+    value: ${{ steps.version-check.outputs.already_published }}
+  version_url:
+    description: "Human URL for the version on PyPI"
+    value: ${{ steps.version-check.outputs.version_url }}
+  pr_list:
+    description: "Formatted PR list (x1f-delimited)"
+    value: ${{ steps.fetch.outputs.pr_list }}
+  notes:
+    description: "Base64-encoded release notes"
+    value: ${{ steps.fetch.outputs.notes }}
+  package:
+    description: "A JSON object describing the package to be published."
+    value: ${{ steps.build.outputs.package }}
 
 runs:
   using: composite
@@ -79,16 +111,12 @@ runs:
         ref: ${{ inputs.sha }}
         fetch-depth: 0
 
-    # configure reads the version (version.py) — so it sets up uv with a default Python
-    # itself. The requirement is guaranteed by the action (no python_version input); any
-    # Python reads the version, and the project's pinned toolchain is only needed to
-    # BUILD (validate / build-and-ship). Read-only: no dependency install.
+    # Read-only version read: a default Python reads version_file; the project's pinned
+    # toolchain is only needed to BUILD (validate / ship). No dependency install.
     - name: Set up uv
       uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9 # v7.2.0
       with:
         python-version: '3.13'
-        # No dependency install here, so leave the cache off — otherwise setup-uv's
-        # post-job save-cache errors on the empty cache and fails the job.
         enable-cache: "false"
 
     - name: Read version
@@ -168,6 +196,148 @@ runs:
           echo "github_release=$GHR"
         } >> "$GITHUB_OUTPUT"
         echo "Configured $TAG @ $VERSION (channel=$CHANNEL, github_release=$GHR, branch=$BRANCH, on_release_branch=$ON_RELEASE_BRANCH)"
+
+    - name: Check PyPI version availability
+      id: version-check
+      shell: bash
+      env:
+        PACKAGE_NAME: ${{ inputs.pypi_package_name }}
+        VERSION: ${{ steps.read-version.outputs.version }}
+        SEVERITY: off
+      run: |
+        if [ -z "$PACKAGE_NAME" ]; then
+          echo "No package_name provided; skipping PyPI availability check."
+          exit 0
+        fi
+        echo "version_url=https://pypi.org/project/$PACKAGE_NAME/$VERSION/" >> "$GITHUB_OUTPUT"
+        CODE=$(curl -sS -o /dev/null -w '%{http_code}' \
+          --retry 3 --retry-connrefused --max-time 30 \
+          "https://pypi.org/pypi/$PACKAGE_NAME/$VERSION/json")
+        case "$CODE" in
+          200)
+            echo "already_published=true" >> "$GITHUB_OUTPUT"
+            if [ "$SEVERITY" = "off" ]; then
+              echo "$PACKAGE_NAME $VERSION is already on PyPI."
+            elif [ "$SEVERITY" = "warn" ]; then
+              echo "::warning title=Already published::$PACKAGE_NAME $VERSION is already on PyPI."
+            else
+              echo "::error title=Version already published::$PACKAGE_NAME $VERSION already exists on PyPI — has the version been bumped?"
+              exit 1
+            fi
+            ;;
+          404)
+            echo "already_published=false" >> "$GITHUB_OUTPUT"
+            echo "$PACKAGE_NAME $VERSION is available on PyPI."
+            ;;
+          *)
+            echo "::error title=Registry check failed::unexpected response from PyPI (HTTP $CODE) checking $PACKAGE_NAME $VERSION — cannot confirm the version is unpublished; aborting rather than risk a bad release."
+            exit 1
+            ;;
+        esac
+
+    - name: Fetch PR list and release notes
+      id: fetch
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        RELEASE_TAG: ${{ steps.configure.outputs.release_tag }}
+        SHA: ${{ inputs.sha }}
+        PREV_RELEASE: ${{ inputs.prev_release || steps.configure.outputs.prev_release }}
+      run: |
+        # If prev_release is a full SHA, notes are unavailable.
+        if echo "$PREV_RELEASE" | grep -qE '^[0-9a-f]{40}$'; then
+          echo "SHA provided for prev_release — notes unavailable for SHA ranges."
+          echo "pr_list=" >> $GITHUB_OUTPUT
+          echo "notes=$(echo "" | base64 -w 0)" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+
+        BODY=$(gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
+          --method POST \
+          --field tag_name="$RELEASE_TAG" \
+          --field target_commitish="$SHA" \
+          ${PREV_RELEASE:+--field previous_tag_name="$PREV_RELEASE"} \
+          --jq '.body' 2>/dev/null || echo "")
+
+        PR_LIST=$(echo "$BODY" \
+          | grep "^\* " \
+          | grep -v "made their first contribution" \
+          | grep -v "Full Changelog" \
+          | head -10 \
+          | sed 's|^\* ||' \
+          | sed 's| by @[^ ]*||' \
+          | sed 's@ in \(https://[^ ]*/pull/\([0-9]*\)\)@ (<\1|#\2>)@' \
+          | sed 's/^/• /' \
+          | tr '\n' $'\x1f' || echo "")
+
+        echo "pr_list=$PR_LIST" >> $GITHUB_OUTPUT
+        echo "notes=$(echo "$BODY" | base64 -w 0)" >> $GITHUB_OUTPUT
+
+    - name: Build package manifest entry
+      id: build
+      shell: bash
+      env:
+        LABEL: "${{ inputs.package_label }}"
+        EMOJI: "${{ inputs.emoji }}"
+        TAG: "${{ steps.configure.outputs.release_tag }}"
+        PREV_RELEASE: "${{ inputs.prev_release || steps.configure.outputs.prev_release }}"
+        PR_LIST: "${{ steps.fetch.outputs.pr_list }}"
+        NOTES: "${{ steps.fetch.outputs.notes }}"
+        GITHUB_RELEASE: "${{ steps.configure.outputs.github_release }}"
+        NPM_NAME: ""
+        NPM_VERSION: ""
+        NPM_CHANNEL: ""
+        NPM_VERSION_URL: ""
+        NPM_ALREADY_PUBLISHED: ""
+        PYPI_NAME: "${{ inputs.pypi_package_name }}"
+        PYPI_VERSION: "${{ steps.read-version.outputs.version }}"
+        PYPI_VERSION_URL: "${{ steps.version-check.outputs.version_url }}"
+        PYPI_ALREADY_PUBLISHED: "${{ steps.version-check.outputs.already_published }}"
+        RUBYGEMS_NAME: ""
+        RUBYGEMS_VERSION: ""
+        RUBYGEMS_VERSION_URL: ""
+        RUBYGEMS_ALREADY_PUBLISHED: ""
+      run: |
+        set -euo pipefail
+        if ! command -v jq >/dev/null 2>&1; then
+          echo "::error title=jq not found::build-manifest requires jq."
+          exit 1
+        fi
+
+        REGISTRIES='{}'
+        # Add one registry entry (keyed by id) when its name/version are given. version_url is
+        # carried in (from the availability check); empties dropped; already_published → boolean.
+        add_registry() {
+          local reg="$1" name="$2" version="$3" channel="$4" ap="$5" url="$6"
+          { [ -z "$name" ] && [ -z "$version" ]; } && return 0
+          local entry
+          entry="$(jq -nc \
+            --arg name "$name" --arg version "$version" --arg url "$url" \
+            --arg channel "$channel" --arg ap "$ap" \
+            '{name:$name, version:$version, version_url:$url, channel:$channel}
+             | with_entries(select(.value != ""))
+             | if $ap=="true" then .already_published=true
+               elif $ap=="false" then .already_published=false else . end')"
+          REGISTRIES="$(jq -c --arg r "$reg" --argjson e "$entry" '. + {($r): $e}' <<<"$REGISTRIES")"
+        }
+        add_registry npm      "$NPM_NAME"      "$NPM_VERSION"      "$NPM_CHANNEL" "$NPM_ALREADY_PUBLISHED"      "$NPM_VERSION_URL"
+        add_registry pypi     "$PYPI_NAME"     "$PYPI_VERSION"     ""            "$PYPI_ALREADY_PUBLISHED"     "$PYPI_VERSION_URL"
+        add_registry rubygems "$RUBYGEMS_NAME" "$RUBYGEMS_VERSION" ""            "$RUBYGEMS_ALREADY_PUBLISHED" "$RUBYGEMS_VERSION_URL"
+
+        # Package-level object; drop empties, then attach registries only when non-empty.
+        PACKAGE="$(jq -nc \
+          --arg label "$LABEL" --arg emoji "$EMOJI" --arg tag "$TAG" \
+          --arg prev_release "$PREV_RELEASE" --arg pr_list "$PR_LIST" --arg notes "$NOTES" \
+          --arg github_release "$GITHUB_RELEASE" \
+          '{label:$label, emoji:$emoji, tag:$tag, prev_release:$prev_release,
+            pr_list:$pr_list, notes:$notes, github_release:$github_release}
+           | with_entries(select(.value != ""))')"
+        if [ "$REGISTRIES" != "{}" ]; then
+          PACKAGE="$(jq -c --argjson r "$REGISTRIES" '. + {registries:$r}' <<<"$PACKAGE")"
+        fi
+
+        echo "package=$PACKAGE" >> "$GITHUB_OUTPUT"
+        echo "Built package manifest entry: $(jq -c '{keys:keys, registries:(.registries // {} | keys)}' <<<"$PACKAGE")"
 
     - name: Dump Python environment
       if: ${{ failure() }}

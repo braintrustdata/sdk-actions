@@ -3,25 +3,15 @@
 name: Build Package Manifest
 description: >
   Formats one package's release facts into a single, well-formed package manifest entry
-  (compact JSON). Multi-package release workflows call this once per package — specifying
-  presentation (label, emoji) at the call site, near where it's used — then splice the
-  emitted entries into the `packages` input of `request-approval` (or another
-  multi-package release action). Single-package workflows don't need this: pass the
-  scalars straight to `request-approval`.
-
-  Package-level facts (label, emoji, tag, prev_release, pr_list, notes, github_release)
-  describe the release unit. Registry-level facts are given with a per-registry PREFIX
-  (`npm_*`, `pypi_*`, `rubygems_*`) and nested under `registries.<registry>` — so ONE
-  call describes a package on one OR several well-known registries (fill only the
-  prefixes that apply). `version_url` is derived here from (registry, name, version).
-
-  The output object contains only the fields you provide (empties dropped). `pr_list`
-  (x1f-delimited) and `notes` (base64) are carried verbatim and JSON-escaped by `jq`, so
-  the entries are safe to splice into a JSON array via GitHub expression interpolation
-  without any further shell/`jq` in the consumer.
+  (compact JSON) via the shared release/build-manifest step. Multi-package workflows call
+  this once per package (label/emoji at the call site) and splice the entries into
+  request-approval's `packages`. Package-level facts (label, emoji, tag, prev_release,
+  pr_list, notes, github_release) + per-registry facts under a prefix (npm_/pypi_/
+  rubygems_) → nested `registries.<id>`; one call may carry several registries. Empties
+  dropped. `pr_list` (x1f) and `notes` (base64) are JSON-escaped, so entries splice into
+  a JSON array via GitHub expression interpolation with no further shell/jq.
 
 inputs:
-  # ── package-level (the release unit) ──
   label:
     description: "Display label for notifications (defaults, downstream, to a registry name / tag)"
     required: false
@@ -50,7 +40,6 @@ inputs:
     description: "Whether a GitHub release should be created for this package"
     required: false
     default: ''
-  # ── registry-level (prefixed; fill the prefixes that apply → registries.<id>) ──
   npm_name:
     description: "npm: package name (presence adds an npm registry entry)"
     required: false
@@ -63,8 +52,12 @@ inputs:
     description: "npm: dist-tag / channel"
     required: false
     default: ''
+  npm_version_url:
+    description: "npm: human URL for the version (from validate/configure)"
+    required: false
+    default: ''
   npm_already_published:
-    description: "npm: 'true'/'false' — is this version already on npm (from validate)"
+    description: "npm: 'true'/'false' — is this version already on npm"
     required: false
     default: ''
   pypi_name:
@@ -75,8 +68,12 @@ inputs:
     description: "PyPI: version"
     required: false
     default: ''
+  pypi_version_url:
+    description: "PyPI: human URL for the version"
+    required: false
+    default: ''
   pypi_already_published:
-    description: "PyPI: 'true'/'false' — is this version already on PyPI (from validate)"
+    description: "PyPI: 'true'/'false' — is this version already on PyPI"
     required: false
     default: ''
   rubygems_name:
@@ -87,8 +84,12 @@ inputs:
     description: "RubyGems: version"
     required: false
     default: ''
+  rubygems_version_url:
+    description: "RubyGems: human URL for the version"
+    required: false
+    default: ''
   rubygems_already_published:
-    description: "RubyGems: 'true'/'false' — is this version already on RubyGems (from validate)"
+    description: "RubyGems: 'true'/'false' — is this version already on RubyGems"
     required: false
     default: ''
 
@@ -104,43 +105,39 @@ runs:
       id: build
       shell: bash
       env:
-        LABEL: ${{ inputs.label }}
-        EMOJI: ${{ inputs.emoji }}
-        TAG: ${{ inputs.tag }}
-        PREV_RELEASE: ${{ inputs.prev_release }}
-        PR_LIST: ${{ inputs.pr_list }}
-        NOTES: ${{ inputs.notes }}
-        GITHUB_RELEASE: ${{ inputs.github_release }}
-        NPM_NAME: ${{ inputs.npm_name }}
-        NPM_VERSION: ${{ inputs.npm_version }}
-        NPM_CHANNEL: ${{ inputs.npm_channel }}
-        NPM_ALREADY_PUBLISHED: ${{ inputs.npm_already_published }}
-        PYPI_NAME: ${{ inputs.pypi_name }}
-        PYPI_VERSION: ${{ inputs.pypi_version }}
-        PYPI_ALREADY_PUBLISHED: ${{ inputs.pypi_already_published }}
-        RUBYGEMS_NAME: ${{ inputs.rubygems_name }}
-        RUBYGEMS_VERSION: ${{ inputs.rubygems_version }}
-        RUBYGEMS_ALREADY_PUBLISHED: ${{ inputs.rubygems_already_published }}
+        LABEL: "${{ inputs.label }}"
+        EMOJI: "${{ inputs.emoji }}"
+        TAG: "${{ inputs.tag }}"
+        PREV_RELEASE: "${{ inputs.prev_release }}"
+        PR_LIST: "${{ inputs.pr_list }}"
+        NOTES: "${{ inputs.notes }}"
+        GITHUB_RELEASE: "${{ inputs.github_release }}"
+        NPM_NAME: "${{ inputs.npm_name }}"
+        NPM_VERSION: "${{ inputs.npm_version }}"
+        NPM_CHANNEL: "${{ inputs.npm_channel }}"
+        NPM_VERSION_URL: "${{ inputs.npm_version_url }}"
+        NPM_ALREADY_PUBLISHED: "${{ inputs.npm_already_published }}"
+        PYPI_NAME: "${{ inputs.pypi_name }}"
+        PYPI_VERSION: "${{ inputs.pypi_version }}"
+        PYPI_VERSION_URL: "${{ inputs.pypi_version_url }}"
+        PYPI_ALREADY_PUBLISHED: "${{ inputs.pypi_already_published }}"
+        RUBYGEMS_NAME: "${{ inputs.rubygems_name }}"
+        RUBYGEMS_VERSION: "${{ inputs.rubygems_version }}"
+        RUBYGEMS_VERSION_URL: "${{ inputs.rubygems_version_url }}"
+        RUBYGEMS_ALREADY_PUBLISHED: "${{ inputs.rubygems_already_published }}"
       run: |
         set -euo pipefail
         if ! command -v jq >/dev/null 2>&1; then
-          echo "::error title=jq not found::build-package-manifest requires jq."
+          echo "::error title=jq not found::build-manifest requires jq."
           exit 1
         fi
 
         REGISTRIES='{}'
         # Add one registry entry (keyed by id) when its name/version are given. version_url is
-        # derived for known registries; empties dropped; already_published → boolean.
+        # carried in (from the availability check); empties dropped; already_published → boolean.
         add_registry() {
-          local reg="$1" name="$2" version="$3" channel="$4" ap="$5" url=""
+          local reg="$1" name="$2" version="$3" channel="$4" ap="$5" url="$6"
           { [ -z "$name" ] && [ -z "$version" ]; } && return 0
-          if [ -n "$name" ] && [ -n "$version" ]; then
-            case "$reg" in
-              npm)      url="https://www.npmjs.com/package/$name/v/$version" ;;
-              pypi)     url="https://pypi.org/project/$name/$version/" ;;
-              rubygems) url="https://rubygems.org/gems/$name/versions/$version" ;;
-            esac
-          fi
           local entry
           entry="$(jq -nc \
             --arg name "$name" --arg version "$version" --arg url "$url" \
@@ -151,9 +148,9 @@ runs:
                elif $ap=="false" then .already_published=false else . end')"
           REGISTRIES="$(jq -c --arg r "$reg" --argjson e "$entry" '. + {($r): $e}' <<<"$REGISTRIES")"
         }
-        add_registry npm      "$NPM_NAME"      "$NPM_VERSION"      "$NPM_CHANNEL" "$NPM_ALREADY_PUBLISHED"
-        add_registry pypi     "$PYPI_NAME"     "$PYPI_VERSION"     ""            "$PYPI_ALREADY_PUBLISHED"
-        add_registry rubygems "$RUBYGEMS_NAME" "$RUBYGEMS_VERSION" ""            "$RUBYGEMS_ALREADY_PUBLISHED"
+        add_registry npm      "$NPM_NAME"      "$NPM_VERSION"      "$NPM_CHANNEL" "$NPM_ALREADY_PUBLISHED"      "$NPM_VERSION_URL"
+        add_registry pypi     "$PYPI_NAME"     "$PYPI_VERSION"     ""            "$PYPI_ALREADY_PUBLISHED"     "$PYPI_VERSION_URL"
+        add_registry rubygems "$RUBYGEMS_NAME" "$RUBYGEMS_VERSION" ""            "$RUBYGEMS_ALREADY_PUBLISHED" "$RUBYGEMS_VERSION_URL"
 
         # Package-level object; drop empties, then attach registries only when non-empty.
         PACKAGE="$(jq -nc \

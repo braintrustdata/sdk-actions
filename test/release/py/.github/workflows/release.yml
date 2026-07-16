@@ -27,11 +27,13 @@ on:
         default: false
 
 jobs:
+  # FACT-FIND — derive version/tag/notes, check the registry, and emit the package manifest.
+  # contents: write is for the releases/generate-notes API.
   configure:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
-      contents: read
+      contents: write
     outputs:
       version: ${{ steps.configure.outputs.version }}
       release_tag: ${{ steps.configure.outputs.release_tag }}
@@ -40,6 +42,9 @@ jobs:
       on_release_branch: ${{ steps.configure.outputs.on_release_branch }}
       commit_message: ${{ steps.configure.outputs.commit_message }}
       github_release: ${{ steps.configure.outputs.github_release }}
+      already_published: ${{ steps.configure.outputs.already_published }}
+      notes: ${{ steps.configure.outputs.notes }}
+      package: ${{ steps.configure.outputs.package }}
     steps:
       - name: Configure release
         id: configure
@@ -49,27 +54,13 @@ jobs:
           sha: ${{ inputs.sha }}
           working_directory: .
           release_type: ${{ inputs.release_type }}
-
-  prepare:
-    needs: configure
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions:
-      contents: write  # releases/generate-notes API
-    outputs:
-      pr_list: ${{ steps.prepare.outputs.pr_list }}
-      notes: ${{ steps.prepare.outputs.notes }}
-    steps:
-      - name: Prepare release
-        id: prepare
-        uses: braintrustdata/sdk-actions/actions/release/prepare@38dcec863c910f6802c03a94ab9aeb79931a0a3a
-        with:
-          release_tag: ${{ needs.configure.outputs.release_tag }}
-          sha: ${{ inputs.sha }}
-          prev_release: ${{ inputs.prev_release || needs.configure.outputs.prev_release }}
+          pypi_package_name: bt-publishing-test
+          package_label: bt-publishing-test
+          emoji: ':python:'
+          prev_release: ${{ inputs.prev_release }}
 
   validate:
-    needs: [configure, prepare]
+    needs: [configure]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -78,18 +69,17 @@ jobs:
       - name: Validate release
         uses: braintrustdata/sdk-actions/actions/release/lang/py/validate@38dcec863c910f6802c03a94ab9aeb79931a0a3a
         with:
-          version: ${{ needs.configure.outputs.version }}
           sha: ${{ inputs.sha }}
           dry_run: ${{ inputs.dry_run }}
           working_directory: .
           python_version: .python-version
-          package_name: bt-publishing-test
           release_tag: ${{ needs.configure.outputs.release_tag }}
           on_release_branch: ${{ needs.configure.outputs.on_release_branch }}
-          notes: ${{ needs.prepare.outputs.notes }}
+          notes: ${{ needs.configure.outputs.notes }}
+          already_published: ${{ needs.configure.outputs.already_published }}
 
   request-approval:
-    needs: [configure, prepare, validate]
+    needs: [configure, validate]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions: {}
@@ -97,22 +87,17 @@ jobs:
       - name: Request release approval
         uses: braintrustdata/sdk-actions/actions/release/request-approval@38dcec863c910f6802c03a94ab9aeb79931a0a3a
         with:
+          packages: '[${{ needs.configure.outputs.package }}]'
           sha: ${{ inputs.sha }}
-          release_tag: ${{ needs.configure.outputs.release_tag }}
-          prev_release: ${{ needs.configure.outputs.prev_release }}
           branch: ${{ needs.configure.outputs.branch }}
           on_release_branch: ${{ needs.configure.outputs.on_release_branch }}
           commit_message: ${{ needs.configure.outputs.commit_message }}
-          pr_list: ${{ needs.prepare.outputs.pr_list }}
-          notes: ${{ needs.prepare.outputs.notes }}
           dry_run: ${{ inputs.dry_run }}
           slack_token: ${{ secrets.SLACK_BOT_TOKEN }}
           slack_channel: ${{ vars.SLACK_SDK_RELEASE_CHANNEL }}
-          label: bt-publishing-test
-          emoji: ':python:'
 
   build-and-ship:
-    needs: [configure, prepare, validate, request-approval]
+    needs: [configure, validate, request-approval]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     environment: ${{ inputs.dry_run && 'publish-dry-run' || 'publish' }}
@@ -129,15 +114,15 @@ jobs:
           python_version: .python-version
           dry_run: ${{ inputs.dry_run }}
           release_tag: ${{ needs.configure.outputs.release_tag }}
+          already_published: ${{ needs.configure.outputs.already_published }}
           github_release: ${{ needs.configure.outputs.github_release }}
           version: ${{ needs.configure.outputs.version }}
           package_name: bt-publishing-test
           label: bt-publishing-test
-          notes: ${{ needs.prepare.outputs.notes }}
+          notes: ${{ needs.configure.outputs.notes }}
           prev_release: ${{ needs.configure.outputs.prev_release }}
           branch: ${{ needs.configure.outputs.branch }}
           on_release_branch: ${{ needs.configure.outputs.on_release_branch }}
-          pr_list: ${{ needs.prepare.outputs.pr_list }}
           slack_token: ${{ secrets.SLACK_BOT_TOKEN }}
           slack_channel: ${{ vars.SLACK_SDK_RELEASE_CHANNEL }}
           emoji: ':python:'

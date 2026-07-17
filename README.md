@@ -52,19 +52,64 @@ bin/workflow update  release.yml    # 3-way merge upstream changes in, keeping y
 #   machine-readable:  sed -n 's/^# sdk-actions: //p' action.yml | jq -r .version
 ```
 
+### Manifest-driven npm tarball releases
+
+For monorepos that own their own build and package selection, create a manifest
+plus prebuilt npm tarballs and SBOMs in the source repository, attest those
+artifacts before upload, then call `release/lang/js/publish-npm-tarballs` from the
+gated publish job. The action verifies the downloaded tarball attestations,
+then publishes the exact tarballs to npmjs in manifest order. After the source
+repository pushes its package tags, call `release/create-package-github-releases`; it
+attaches each package's `sbom_asset` from the manifest directory.
+
+The manifest passed between build and publish jobs is JSON in this shape:
+
+```json
+{
+  "commit": "0123456789abcdef0123456789abcdef01234567",
+  "packages": [
+    {
+      "name": "@scope/package",
+      "version": "1.2.3",
+      "dir": "packages/package",
+      "tag": "@scope/package@1.2.3",
+      "tarball_asset": "scope-package-1.2.3.tgz",
+      "sbom_asset": "scope-package-1.2.3.sbom.json",
+      "release_title": "@scope/package@1.2.3",
+      "release_body": "Markdown release notes",
+      "channel": "latest",
+      "provenance": true
+    }
+  ]
+}
+```
+
+`name` and `version` are required. `packages` must already be in publish order.
+`dir` and `commit` are source-repository metadata, useful while building and
+tagging. `tarball_asset` identifies the downloaded tarball basename and is required
+by `publish-npm-tarballs`. `sbom_asset` is required by
+`create-package-github-releases` and is resolved relative to the manifest file's
+directory. `tag` defaults to `name@version`; `release_title` defaults to `tag`; and
+`release_body` defaults to a short publish message. `channel` and `provenance`
+may override the `publish-npm-tarballs` defaults per package. JavaScript SBOM
+generation commonly uses `pnpm sbom`, which requires pnpm `>= 11.8`.
+
 ### Available release actions
 
 The workflow is composed from these actions — `bin/workflow generate` wires them for you, but they're listed here for reference. Each is **self-contained** (calls no other action in this repo), so a single SHA pin pulls in everything it needs.
 
-| Action | Purpose |
-|---|---|
-| `release/lang/<lang>/configure` | Derive release facts (tag, channel, rc suffix, `github_release`) from the version + `release_type` — read-only |
-| `release/prepare` | Fetch the PR list and release notes |
-| `release/lang/<lang>/validate` | Validate the release (tag / channel / branch / metadata, registry availability) and run a pre-gate build + SBOM generation |
-| `release/request-approval` | Post the pre-approval job summary and Slack notification |
-| `release/lang/<lang>/build-and-ship` | **Turnkey**: build → sign a CycloneDX SBOM (+ build provenance for Ruby) → publish (OIDC trusted publishing) → create the GitHub release (SBOM attached) → notify |
-| `release/lang/js/pack-pnpm` · `pack-bun`, `release/lang/{py,ruby}/pack` | **Custom build**: build + pack + sign SBOM + build provenance in an unprivileged job (no publish credentials) |
-| `release/lang/<lang>/ship-package` | **Custom build**: verify the attestation against the downloaded artifact → publish that exact artifact → create the GitHub release → notify |
+| Action                                                                  | Purpose                                                                                                                                                           |
+| ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `release/lang/<lang>/configure`                                         | Derive release facts (tag, channel, rc suffix, `github_release`) from the version + `release_type` — read-only                                                    |
+| `release/prepare`                                                       | Fetch the PR list and release notes                                                                                                                               |
+| `release/lang/<lang>/validate`                                          | Validate the release (tag / channel / branch / metadata, registry availability) and run a pre-gate build + SBOM generation                                        |
+| `release/request-approval`                                              | Post the pre-approval job summary and Slack notification                                                                                                          |
+| `release/lang/<lang>/build-and-ship`                                    | **Turnkey**: build → sign a CycloneDX SBOM (+ build provenance for Ruby) → publish (OIDC trusted publishing) → create the GitHub release (SBOM attached) → notify |
+| `release/lang/js/pack-pnpm` · `pack-bun`, `release/lang/{py,ruby}/pack` | **Custom build**: build + pack + sign SBOM + build provenance in an unprivileged job (no publish credentials)                                                     |
+| `release/lang/<lang>/ship-package`                                      | **Custom build**: verify the attestation against the downloaded artifact → publish that exact artifact → create the GitHub release → notify                       |
+| `release/lang/js/publish-npm-tarballs`                                  | Verify prebuilt npm tarballs by glob and publish the exact bytes to npmjs in manifest order                                                                       |
+| `release/create-package-github-releases`                                | Create package GitHub releases from existing manifest tags, titles, and bodies, attaching each `sbom_asset` from the manifest directory                           |
+| `release/verify-package`                                                | Verify downloaded artifact attestations without using a language-specific ship action                                                                             |
 
 Inputs and outputs are documented in each `action.yml`. Reference an action by commit SHA:
 

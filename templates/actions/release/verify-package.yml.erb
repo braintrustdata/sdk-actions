@@ -1,0 +1,26 @@
+name: Verify Release Package Attestations
+description: >
+  Verifies downloaded release artifact attestations against their own bytes. Use this
+  in custom release workflows that publish multiple prebuilt artifacts without using a
+  language-specific ship-package action.
+
+inputs:
+  artifacts:
+    description: "Space-separated artifact paths or globs to verify"
+    required: true
+  repo:
+    description: "GitHub owner/repo where the attestations live"
+    required: false
+    default: '${{ github.repository }}'
+  dry_run:
+    description: "Skip verification when artifacts were intentionally not attested"
+    required: false
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+<%= render_step('release/verify-package',
+      if:        "${{ inputs.dry_run != 'true' }}",
+      artifacts: "${{ inputs.artifacts }}",
+      repo:      "${{ inputs.repo }}") %>

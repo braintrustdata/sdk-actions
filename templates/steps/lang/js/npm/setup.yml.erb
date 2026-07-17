@@ -1,0 +1,20 @@
+<%#
+  Sets up Node for direct npm CLI publishing and installs a modern npm with OIDC
+  trusted publishing support. This is for publish-only flows that do not need
+  pnpm/bun or dependency installation.
+
+  @param node_version [String] Node version. Default: lts/*
+  @param registry     [String] npm registry URL. Default: ${{ inputs.registry }}
+  @param npm_version  [String] npm CLI version. Default: ${{ inputs.npm_version }}
+-%>
+- name: Set up Node
+  uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+  with:
+    node-version: <%= locals.fetch(:node_version) { "lts/*" } %>
+    registry-url: <%= locals.fetch(:registry) { "${{ inputs.registry }}" } %>
+
+- name: Install npm with OIDC trusted publishing support
+  shell: bash
+  env:
+    NPM_VERSION: <%= locals.fetch(:npm_version) { "${{ inputs.npm_version }}" } %>
+  run: npm install -g "npm@$NPM_VERSION"

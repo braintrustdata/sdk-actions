@@ -127,15 +127,6 @@ runs:
 
         : > "$REPORT"
 
-        artifact_base() {
-          local name="$1"
-          local version="$2"
-          local base="${name#@}"
-          base="${base//\//-}"
-          base="${base//@/-}"
-          printf '%s-%s' "$base" "$version"
-        }
-
         find_tarball() {
           local expected="$1"
           local matched=()
@@ -153,15 +144,32 @@ runs:
           printf '%s\n' "${matched[0]}"
         }
 
+        packages_tsv="$(mktemp)"
+        trap 'rm -f "$packages_tsv"' EXIT
+
         while IFS= read -r encoded; do
           package_json="$(printf '%s' "$encoded" | base64 -d)"
-          name="$(jq -r '.name' <<< "$package_json")"
-          version="$(jq -r '.version' <<< "$package_json")"
-          expected_tarball="$(jq -r '.tarball_asset // .tarball // empty' <<< "$package_json")"
+          name="$(jq -r '.name // empty' <<< "$package_json")"
+          version="$(jq -r '.version // empty' <<< "$package_json")"
+          expected_tarball="$(jq -r '.tarball_asset // empty' <<< "$package_json")"
           channel="$(jq -r '.channel // empty' <<< "$package_json")"
           provenance="$(jq -r '.provenance // empty' <<< "$package_json")"
 
-          [ -n "$expected_tarball" ] || expected_tarball="$(artifact_base "$name" "$version").tgz"
+          if [ -z "$name" ] || [ -z "$version" ]; then
+            echo "::error title=Manifest package invalid::each package must set name and version."
+            exit 1
+          fi
+
+          if [ -z "$expected_tarball" ]; then
+            echo "::error title=Tarball asset missing::manifest package $name@$version must set tarball_asset."
+            exit 1
+          fi
+
+          if [ "$(basename "$expected_tarball")" != "$expected_tarball" ]; then
+            echo "::error title=Invalid tarball asset::tarball_asset must be a file basename, got: $expected_tarball"
+            exit 1
+          fi
+
           [ -n "$channel" ] || channel="$DEFAULT_CHANNEL"
           [ -n "$provenance" ] || provenance="$DEFAULT_PROVENANCE"
 
@@ -173,6 +181,15 @@ runs:
             exit 1
           fi
 
+          printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$name" "$version" "$expected_tarball" "$tarball" "$channel" "$provenance" >> "$packages_tsv"
+        done < <(jq -r '.packages[]? | @base64' "$MANIFEST")
+
+        if [ ! -s "$packages_tsv" ]; then
+          echo "::error title=Manifest empty::release manifest must contain at least one package."
+          exit 1
+        fi
+
+        while IFS=$'\t' read -r name version expected_tarball tarball channel provenance; do
           args=(--tag "$channel" --access public --registry https://registry.npmjs.org)
           [ "$provenance" = "true" ] && args+=(--provenance)
 
@@ -194,7 +211,7 @@ runs:
           fi
 
           printf '%s\t%s\t%s\t%s\n' "$name" "$version" "$status" "$tarball" >> "$REPORT"
-        done < <(jq -r '.packages[]? | @base64' "$MANIFEST")
+        done < "$packages_tsv"
 
     - name: Post publish summary
       shell: bash

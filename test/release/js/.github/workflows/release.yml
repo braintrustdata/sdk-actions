@@ -32,11 +32,13 @@ on:
         default: false
 
 jobs:
+  # FACT-FIND — derive version/tag/notes, check the registry, and emit the package manifest.
+  # contents: write is for the releases/generate-notes API.
   configure:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
-      contents: read
+      contents: write
     outputs:
       version: ${{ steps.configure.outputs.version }}
       release_tag: ${{ steps.configure.outputs.release_tag }}
@@ -46,6 +48,9 @@ jobs:
       commit_message: ${{ steps.configure.outputs.commit_message }}
       channel: ${{ steps.configure.outputs.channel }}
       github_release: ${{ steps.configure.outputs.github_release }}
+      already_published: ${{ steps.configure.outputs.already_published }}
+      notes: ${{ steps.configure.outputs.notes }}
+      package: ${{ steps.configure.outputs.package }}
     steps:
       - name: Configure release
         id: configure
@@ -54,28 +59,14 @@ jobs:
           sha: ${{ inputs.sha }}
           working_directory: .
           release_type: ${{ inputs.release_type }}
-          channel: ${{ inputs.channel }}
-
-  prepare:
-    needs: configure
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions:
-      contents: write  # releases/generate-notes API
-    outputs:
-      pr_list: ${{ steps.prepare.outputs.pr_list }}
-      notes: ${{ steps.prepare.outputs.notes }}
-    steps:
-      - name: Prepare release
-        id: prepare
-        uses: braintrustdata/sdk-actions/actions/release/prepare@38dcec863c910f6802c03a94ab9aeb79931a0a3a
-        with:
-          release_tag: ${{ needs.configure.outputs.release_tag }}
-          sha: ${{ inputs.sha }}
-          prev_release: ${{ inputs.prev_release || needs.configure.outputs.prev_release }}
+          npm_channel: ${{ inputs.channel }}
+          npm_package_name: '@braintrust/bt-publishing-test'
+          package_label: '@braintrust/bt-publishing-test'
+          emoji: ':javascript:'
+          prev_release: ${{ inputs.prev_release }}
 
   validate:
-    needs: [configure, prepare]
+    needs: [configure]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -84,20 +75,19 @@ jobs:
       - name: Validate release
         uses: braintrustdata/sdk-actions/actions/release/lang/js/validate@38dcec863c910f6802c03a94ab9aeb79931a0a3a
         with:
-          version: ${{ needs.configure.outputs.version }}
           sha: ${{ inputs.sha }}
           dry_run: ${{ inputs.dry_run }}
           working_directory: .
           node_version: .nvmrc
-          package_name: '@braintrust/bt-publishing-test'
           release_tag: ${{ needs.configure.outputs.release_tag }}
           channel: ${{ needs.configure.outputs.channel }}
           allowed_channels: 'latest,rc,next,beta'
           on_release_branch: ${{ needs.configure.outputs.on_release_branch }}
-          notes: ${{ needs.prepare.outputs.notes }}
+          notes: ${{ needs.configure.outputs.notes }}
+          already_published: ${{ needs.configure.outputs.already_published }}
 
   request-approval:
-    needs: [configure, prepare, validate]
+    needs: [configure, validate]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions: {}
@@ -105,22 +95,17 @@ jobs:
       - name: Request release approval
         uses: braintrustdata/sdk-actions/actions/release/request-approval@38dcec863c910f6802c03a94ab9aeb79931a0a3a
         with:
+          packages: '{"packages":[${{ needs.configure.outputs.package }}]}'
           sha: ${{ inputs.sha }}
-          release_tag: ${{ needs.configure.outputs.release_tag }}
-          prev_release: ${{ needs.configure.outputs.prev_release }}
           branch: ${{ needs.configure.outputs.branch }}
           on_release_branch: ${{ needs.configure.outputs.on_release_branch }}
           commit_message: ${{ needs.configure.outputs.commit_message }}
-          pr_list: ${{ needs.prepare.outputs.pr_list }}
-          notes: ${{ needs.prepare.outputs.notes }}
           dry_run: ${{ inputs.dry_run }}
           slack_token: ${{ secrets.SLACK_BOT_TOKEN }}
           slack_channel: ${{ vars.SLACK_SDK_RELEASE_CHANNEL }}
-          label: '@braintrust/bt-publishing-test'
-          emoji: ':javascript:'
 
   build-and-ship:
-    needs: [configure, prepare, validate, request-approval]
+    needs: [configure, validate, request-approval]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     environment: ${{ inputs.dry_run && 'publish-dry-run' || 'publish' }}
@@ -137,6 +122,7 @@ jobs:
           node_version: .nvmrc
           dry_run: ${{ inputs.dry_run }}
           release_tag: ${{ needs.configure.outputs.release_tag }}
+          already_published: ${{ needs.configure.outputs.already_published }}
           github_release: ${{ needs.configure.outputs.github_release }}
           version: ${{ needs.configure.outputs.version }}
           access: 'public'
@@ -144,11 +130,10 @@ jobs:
           channel: ${{ needs.configure.outputs.channel }}
           package_name: '@braintrust/bt-publishing-test'
           label: '@braintrust/bt-publishing-test'
-          notes: ${{ needs.prepare.outputs.notes }}
+          notes: ${{ needs.configure.outputs.notes }}
           prev_release: ${{ needs.configure.outputs.prev_release }}
           branch: ${{ needs.configure.outputs.branch }}
           on_release_branch: ${{ needs.configure.outputs.on_release_branch }}
-          pr_list: ${{ needs.prepare.outputs.pr_list }}
           slack_token: ${{ secrets.SLACK_BOT_TOKEN }}
           slack_channel: ${{ vars.SLACK_SDK_RELEASE_CHANNEL }}
           emoji: ':javascript:'

@@ -6,6 +6,10 @@
   manifest — verified locally). Publishes the exact attested bytes, so
   published == attested. Self-guards on the `npm` toggle and dry_run.
 
+  Idempotency (present → skip) is handled by the caller: ship renders the shared
+  lang/js/npm/availability check and gates this step with `if: !already_published`, so
+  this step never needs its own registry check.
+
   @param tarball    [String] expr for the path to the downloaded tarball.
   @param npm        [String] publish to npm or not.   Default: ${{ inputs.npm }}
   @param channel    [String] dist-tag.                Default: ${{ inputs.channel }}

@@ -4,28 +4,17 @@ description: >
   (tag unused, version unpublished on RubyGems, notes present, release branch) — and
   runs lint + a pre-gate build + CycloneDX SBOM generation so failures surface BEFORE
   the approval gate. Read-only: nothing is signed or published here. Every check is a
-  boolean toggle (default on) with an escape hatch.
+  boolean toggle (default on) with an escape hatch. Consumes `configure`'s
+  `already_published` fact (does not query RubyGems itself).
 
 inputs:
   sha:
     description: "Commit SHA being released"
     required: true
   dry_run:
-    description: "Warn instead of failing on an already-existing tag"
+    description: "Warn instead of failing on an already-existing tag / already-published version"
     required: false
     default: 'false'
-  version:
-    description: "Version override (from configure). If empty, read from version_file/version_module."
-    required: false
-    default: ''
-  version_file:
-    description: "Path to the Ruby version file (e.g. lib/gem_name/version.rb)"
-    required: false
-    default: ''
-  version_module:
-    description: "Ruby module holding the VERSION constant (e.g. GemName)"
-    required: false
-    default: ''
   working_directory:
     description: "Path to the gem root (where Gemfile and gemspec live)"
     required: false
@@ -34,13 +23,6 @@ inputs:
     description: "Ruby version to use, or a version file path (.tool-versions, .ruby-version)"
     required: false
     default: '4.0'
-  package_name:
-    description: >
-      RubyGems gem name. Used by the version-unpublished check — the registry, not the
-      git tag, is the source of truth (covers prereleases and force-deleted tags). Leave
-      empty to skip that check.
-    required: false
-    default: ''
   release_tag:
     description: "The release tag (from configure) — checked for prior existence"
     required: true
@@ -49,7 +31,11 @@ inputs:
     required: false
     default: 'true'
   notes:
-    description: "Base64-encoded release notes (from prepare) — checked non-blank"
+    description: "Base64-encoded release notes (from configure) — checked non-blank"
+    required: false
+    default: ''
+  already_published:
+    description: "Whether the version is already on RubyGems (from configure). Judged by check_version_unpublished."
     required: false
     default: ''
   build:
@@ -70,7 +56,7 @@ inputs:
     required: false
     default: 'true'
   check_version_unpublished:
-    description: "Fail if the version is already published to RubyGems"
+    description: "Fail if the version is already published to RubyGems (judges configure's already_published)"
     required: false
     default: 'true'
   check_notes_not_blank:
@@ -91,10 +77,6 @@ runs:
         fetch-depth: 0
 
 <%= render_step('lang/ruby/setup') %>
-
-<%= render_step('lang/ruby/read-version') %>
-
-<%= render_step('lang/ruby/rubygems/availability', if: "${{ inputs.check_version_unpublished == 'true' }}") %>
 
 <%= render_step('release/checks') %>
 

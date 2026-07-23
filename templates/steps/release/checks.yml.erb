@@ -25,7 +25,20 @@
     CHECK_TAG_UNUSED: <%= locals.fetch(:check_tag_unused) { "${{ inputs.check_tag_unused }}" } %>
     CHECK_NOTES: <%= locals.fetch(:check_notes_not_blank) { "${{ inputs.check_notes_not_blank }}" } %>
     ENFORCE_RELEASE_BRANCH: <%= locals.fetch(:enforce_release_branch) { "${{ inputs.enforce_release_branch }}" } %>
+    CHECK_VERSION_UNPUBLISHED: <%= locals.fetch(:check_version_unpublished) { "${{ inputs.check_version_unpublished }}" } %>
+    ALREADY_PUBLISHED: <%= locals.fetch(:already_published) { "${{ inputs.already_published }}" } %>
   run: |
+    # Version not already published on the registry (fact from configure's availability check;
+    # covers prereleases, which aren't git-tagged). Warn (not fail) on a dry run.
+    if [ "$CHECK_VERSION_UNPUBLISHED" = "true" ] && [ "$ALREADY_PUBLISHED" = "true" ]; then
+      if [ "$DRY_RUN" = "true" ]; then
+        echo "::warning title=Version already published::the version is already on the registry — skipping in dry run."
+      else
+        echo "::error title=Version already published::the version is already on the registry — has the version been bumped?"
+        exit 1
+      fi
+    fi
+
     # Tag not already used (covers stable releases; prereleases are covered by the availability check)
     if [ "$CHECK_TAG_UNUSED" = "true" ] && git rev-parse "$TAG" >/dev/null 2>&1; then
       if [ "$DRY_RUN" = "true" ]; then

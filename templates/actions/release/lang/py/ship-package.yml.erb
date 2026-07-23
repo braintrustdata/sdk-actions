@@ -49,6 +49,10 @@ inputs:
     description: "PyPI package name — used to build the PyPI link in notifications"
     required: false
     default: ''
+  already_published:
+    description: "Whether the version is already on PyPI (from configure). When 'true', the publish is skipped."
+    required: false
+    default: ''
   label:
     description: "Display name for release notifications (e.g. the package name)."
     required: false
@@ -68,7 +72,7 @@ inputs:
     description: "Whether the SHA is on an expected release branch"
     required: true
   pr_list:
-    description: "x1f-delimited PR list from prepare action"
+    description: "x1f-delimited PR list from configure"
     required: false
     default: ''
   slack_token:
@@ -100,12 +104,18 @@ runs:
       uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9 # v7.2.0
       with:
         python-version: '3.13'
+        # No dependency install here (we only upload prebuilt dist/ artifacts), and this runs in the
+        # downloaded-artifact dir with no pyproject.toml/uv.lock — so leave the cache off, otherwise
+        # setup-uv's post-job save-cache errors on the missing cache path and fails the job.
+        enable-cache: "false"
 
 <%= render_step('release/verify-package',
       if:        "${{ inputs.dry_run != 'true' }}",
       artifacts: "${{ inputs.working_directory }}/dist/*.whl ${{ inputs.working_directory }}/dist/*.tar.gz") %>
 
-<%= render_step('lang/py/pypi/publish') %>
+<%# Idempotency: gate the publish on configure's already_published fact (no re-query in ship). -%>
+<%= render_step('lang/py/pypi/publish',
+      if: "${{ inputs.already_published != 'true' }}") %>
 
 <%= render_step('release/create-github-release') %>
 

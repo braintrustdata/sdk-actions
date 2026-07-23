@@ -18,4 +18,6 @@
     fi
     echo "links=$LINKS" >> "$GITHUB_OUTPUT"
 
-<%= render_step('release/notify-published', indent: 0, links: "${{ steps.links.outputs.links }}") %>
+<%= render_step('release/notify-published', indent: 0,
+      links: "${{ steps.links.outputs.links }}",
+      already_published: "${{ inputs.already_published }}") %>

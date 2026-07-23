@@ -98,23 +98,30 @@ generation commonly uses `pnpm sbom`, which requires pnpm `>= 11.8`.
 
 The workflow is composed from these actions — `bin/workflow generate` wires them for you, but they're listed here for reference. Each is **self-contained** (calls no other action in this repo), so a single SHA pin pulls in everything it needs.
 
-| Action                                                                  | Purpose                                                                                                                                                           |
-| ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `release/lang/<lang>/configure`                                         | Derive release facts (tag, channel, rc suffix, `github_release`) from the version + `release_type` — read-only                                                    |
-| `release/prepare`                                                       | Fetch the PR list and release notes                                                                                                                               |
-| `release/lang/<lang>/validate`                                          | Validate the release (tag / channel / branch / metadata, registry availability) and run a pre-gate build + SBOM generation                                        |
-| `release/request-approval`                                              | Post the pre-approval job summary and Slack notification                                                                                                          |
-| `release/lang/<lang>/build-and-ship`                                    | **Turnkey**: build → sign a CycloneDX SBOM (+ build provenance for Ruby) → publish (OIDC trusted publishing) → create the GitHub release (SBOM attached) → notify |
-| `release/lang/js/pack-pnpm` · `pack-bun`, `release/lang/{py,ruby}/pack` | **Custom build**: build + pack + sign SBOM + build provenance in an unprivileged job (no publish credentials)                                                     |
-| `release/lang/<lang>/ship-package`                                      | **Custom build**: verify the attestation against the downloaded artifact → publish that exact artifact → create the GitHub release → notify                       |
-| `release/lang/js/publish-npm-tarballs`                                  | Verify prebuilt npm tarballs by glob and publish the exact bytes to npmjs in manifest order                                                                       |
-| `release/create-package-github-releases`                                | Create package GitHub releases from existing manifest tags, titles, and bodies, attaching each `sbom_asset` from the manifest directory                           |
-| `release/verify-package`                                                | Verify downloaded artifact attestations without using a language-specific ship action                                                                             |
+The generated release shape is:
+
+- **Turnkey:** `configure → validate → request-approval → build-and-ship`
+- **Custom build:** `configure → validate → pack → request-approval → ship-package`
+
+`configure` is the fact-finding step: it checks out the release SHA, resolves the package version, computes release metadata, checks the package registry, fetches release notes, and emits a `package` JSON object. `validate` consumes those facts and enforces the release gate. `request-approval` consumes one or more `package` objects through its `packages` input, so single-package and multi-package approvals use the same rendering path (including already-published / skipped packages).
+
+| Action                                                                  | Purpose                                                                                                                                                                  |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `release/lang/<lang>/configure`                                         | Resolve release facts and package metadata: version, tag, branch, channel / `github_release`, registry availability, notes, and the package JSON object for approval      |
+| `release/lang/<lang>/validate`                                          | Judge the configured facts (tag / channel / branch / notes / already-published state) and optionally run a pre-gate build + SBOM generation                              |
+| `release/request-approval`                                              | Post the pre-approval job summary and Slack notification from one or more package objects                                                                                 |
+| `release/lang/<lang>/build-and-ship`                                    | **Turnkey**: build → sign a CycloneDX SBOM (+ build provenance for Ruby) → publish (OIDC trusted publishing) → create the GitHub release (SBOM attached) → notify        |
+| `release/lang/js/pack-pnpm` · `pack-bun`, `release/lang/{py,ruby}/pack` | **Custom build**: build + pack + sign SBOM + build provenance in an unprivileged job (no publish credentials)                                                            |
+| `release/lang/<lang>/ship-package`                                      | **Custom build**: verify the attestation against the downloaded artifact → publish that exact artifact → create the GitHub release → notify                              |
+| `release/build-package-manifest`                                        | Advanced helper for constructing a package object when you are not using a language `configure` action                                                                    |
+| `release/lang/js/publish-npm-tarballs`                                  | Verify prebuilt npm tarballs by glob and publish the exact bytes to npmjs in manifest order                                                                              |
+| `release/create-package-github-releases`                                | Create package GitHub releases from existing manifest tags, titles, and bodies, attaching each `sbom_asset` from the manifest directory                                  |
+| `release/verify-package`                                                | Verify downloaded artifact attestations without using a language-specific ship action                                                                                    |
 
 Inputs and outputs are documented in each `action.yml`. Reference an action by commit SHA:
 
 ```yaml
-- uses: braintrustdata/sdk-actions/actions/release/prepare@<sha>
+- uses: braintrustdata/sdk-actions/actions/release/lang/js/configure@<sha>
 ```
 
 ## Developing

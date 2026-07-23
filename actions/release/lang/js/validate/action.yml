@@ -7,20 +7,17 @@ description: >
   branch) — and runs a pre-gate build + CycloneDX SBOM generation so build/SBOM-tooling
   failures (e.g. pnpm < 11.8) surface BEFORE the approval gate. Read-only: nothing is
   signed or published here. Every check is a boolean toggle (default on) with an escape
-  hatch.
+  hatch. Consumes `configure`'s `already_published` fact (does not query the registry
+  itself — that fact is produced once, in configure).
 
 inputs:
   sha:
     description: "Commit SHA being released"
     required: true
   dry_run:
-    description: "Warn instead of failing on an already-existing tag"
+    description: "Warn instead of failing on an already-existing tag / already-published version"
     required: false
     default: 'false'
-  version:
-    description: "Version override (from configure). If empty, read from package.json."
-    required: false
-    default: ''
   working_directory:
     description: "Path to the package root (where package.json lives)"
     required: false
@@ -32,16 +29,6 @@ inputs:
     required: true
   pnpm_version:
     description: "pnpm version to install. When empty, read from package.json packageManager."
-    required: false
-    default: ''
-  registry:
-    description: "npm registry URL"
-    required: false
-    default: 'https://registry.npmjs.org'
-  package_name:
-    description: >
-      npm package name. Used by the version-unpublished check (covers prereleases,
-      which aren't git-tagged). Leave empty to skip that check.
     required: false
     default: ''
   release_tag:
@@ -60,7 +47,11 @@ inputs:
     required: false
     default: 'true'
   notes:
-    description: "Base64-encoded release notes (from prepare) — checked non-blank"
+    description: "Base64-encoded release notes (from configure) — checked non-blank"
+    required: false
+    default: ''
+  already_published:
+    description: "Whether the version is already on the registry (from configure). Judged by check_version_unpublished."
     required: false
     default: ''
   build:
@@ -85,7 +76,7 @@ inputs:
     required: false
     default: 'true'
   check_version_unpublished:
-    description: "Fail if the version is already published to the registry"
+    description: "Fail if the version is already published to the registry (judges configure's already_published)"
     required: false
     default: 'true'
   check_channel_allowed:
@@ -152,54 +143,6 @@ runs:
           exit 1
         }
 
-    - name: Read version
-      id: read-version
-      shell: bash
-      working-directory: ${{ inputs.working_directory }}
-      env:
-        VERSION_OVERRIDE: ${{ inputs.version }}
-      run: |
-        if [ -n "$VERSION_OVERRIDE" ]; then
-          VERSION="$VERSION_OVERRIDE"
-        else
-          VERSION=$(node -p "require('./package.json').version")
-        fi
-        if [ -z "$VERSION" ] || [ "$VERSION" = "undefined" ]; then
-          echo "::error title=Could not read version::resolved an empty version — check the \"version\" field in package.json (or pass a version override)."
-          exit 1
-        fi
-        echo "version=$VERSION" >> $GITHUB_OUTPUT
-
-    - name: Check npm version availability
-      if: ${{ inputs.check_version_unpublished == 'true' }}
-      shell: bash
-      env:
-        PACKAGE_NAME: ${{ inputs.package_name }}
-        VERSION: ${{ steps.read-version.outputs.version }}
-        REGISTRY: ${{ inputs.registry }}
-      run: |
-        if [ -z "$PACKAGE_NAME" ]; then
-          echo "No package_name provided; skipping npm availability check."
-          exit 0
-        fi
-        REGISTRY="${REGISTRY%/}"
-        CODE=$(curl -sS -o /dev/null -w '%{http_code}' \
-          --retry 3 --retry-connrefused --max-time 30 \
-          "$REGISTRY/$PACKAGE_NAME/$VERSION")
-        case "$CODE" in
-          200)
-            echo "::error title=Version already published::$PACKAGE_NAME@$VERSION already exists on npm — has the version been bumped?"
-            exit 1
-            ;;
-          404)
-            echo "$PACKAGE_NAME@$VERSION is available on npm."
-            ;;
-          *)
-            echo "::error title=Registry check failed::unexpected response from the npm registry (HTTP $CODE) checking $PACKAGE_NAME@$VERSION — cannot confirm the version is unpublished; aborting rather than risk a bad release."
-            exit 1
-            ;;
-        esac
-
     - name: Validate release channel
       if: ${{ inputs.check_channel_allowed == 'true' }}
       shell: bash
@@ -224,7 +167,20 @@ runs:
         CHECK_TAG_UNUSED: ${{ inputs.check_tag_unused }}
         CHECK_NOTES: ${{ inputs.check_notes_not_blank }}
         ENFORCE_RELEASE_BRANCH: ${{ inputs.enforce_release_branch }}
+        CHECK_VERSION_UNPUBLISHED: ${{ inputs.check_version_unpublished }}
+        ALREADY_PUBLISHED: ${{ inputs.already_published }}
       run: |
+        # Version not already published on the registry (fact from configure's availability check;
+        # covers prereleases, which aren't git-tagged). Warn (not fail) on a dry run.
+        if [ "$CHECK_VERSION_UNPUBLISHED" = "true" ] && [ "$ALREADY_PUBLISHED" = "true" ]; then
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "::warning title=Version already published::the version is already on the registry — skipping in dry run."
+          else
+            echo "::error title=Version already published::the version is already on the registry — has the version been bumped?"
+            exit 1
+          fi
+        fi
+
         # Tag not already used (covers stable releases; prereleases are covered by the availability check)
         if [ "$CHECK_TAG_UNUSED" = "true" ] && git rev-parse "$TAG" >/dev/null 2>&1; then
           if [ "$DRY_RUN" = "true" ]; then
@@ -267,11 +223,12 @@ runs:
       shell: bash
       working-directory: ${{ inputs.working_directory }}
       run: |
-        if ! pnpm sbom --help >/dev/null 2>&1; then
+        PNPM="${PACK_PNPM:-pnpm}"
+        if ! $PNPM sbom --help >/dev/null 2>&1; then
           echo "::error title=pnpm sbom unavailable::'pnpm sbom' needs pnpm >= 11.8. Set the package's packageManager (or pnpm_version) to >= 11.8."
           exit 1
         fi
-        pnpm sbom --sbom-format cyclonedx --prod --out sbom.json
+        $PNPM sbom --sbom-format cyclonedx --prod --out sbom.json
         echo "Wrote $(pwd)/sbom.json"
 
     - name: Dump JavaScript environment

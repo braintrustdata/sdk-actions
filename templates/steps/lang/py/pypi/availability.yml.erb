@@ -1,30 +1,47 @@
 <%#
-  Fails fast if the package version is already published to PyPI. Read-only
-  registry query (no auth). Self-guards: skips when package_name is empty.
-  Complements release/validate's git-tag check by covering prereleases, which
-  aren't tagged. Assumes the read-version step (id: read-version) has run.
+  Checks whether the package version is already published to PyPI and exports
+  `already_published` (true|false). Read-only registry query (no auth). This is the
+  SINGLE registry-existence check shared by validate (pre-gate) and ship (at publish
+  time), so the two never drift. Self-guards: skips when package_name is empty. An
+  unexpected HTTP status aborts — we never guess.
 
-  @param package_name [String] expr for the PyPI package name. Default: ${{ inputs.package_name }}
+  `severity` controls what happens when the version IS already published:
+    fail (default) → error + abort · warn → warning + continue · off → just report.
+
+  @param package_name [String] expr for the PyPI package name.   Default: ${{ inputs.package_name }}
+  @param version      [String] expr for the version to check.    Default: ${{ steps.read-version.outputs.version }}
+  @param severity     [String] fail | warn | off.                Default: fail
 -%>
 - name: Check PyPI version availability
+  id: version-check
   shell: bash
   env:
     PACKAGE_NAME: <%= locals.fetch(:package_name) { "${{ inputs.package_name }}" } %>
-    VERSION: ${{ steps.read-version.outputs.version }}
+    VERSION: <%= locals.fetch(:version) { "${{ steps.read-version.outputs.version }}" } %>
+    SEVERITY: <%= locals.fetch(:severity) { "fail" } %>
   run: |
     if [ -z "$PACKAGE_NAME" ]; then
       echo "No package_name provided; skipping PyPI availability check."
       exit 0
     fi
+    echo "version_url=https://pypi.org/project/$PACKAGE_NAME/$VERSION/" >> "$GITHUB_OUTPUT"
     CODE=$(curl -sS -o /dev/null -w '%{http_code}' \
       --retry 3 --retry-connrefused --max-time 30 \
       "https://pypi.org/pypi/$PACKAGE_NAME/$VERSION/json")
     case "$CODE" in
       200)
-        echo "::error title=Version already published::$PACKAGE_NAME $VERSION already exists on PyPI — has the version been bumped?"
-        exit 1
+        echo "already_published=true" >> "$GITHUB_OUTPUT"
+        if [ "$SEVERITY" = "off" ]; then
+          echo "$PACKAGE_NAME $VERSION is already on PyPI."
+        elif [ "$SEVERITY" = "warn" ]; then
+          echo "::warning title=Already published::$PACKAGE_NAME $VERSION is already on PyPI."
+        else
+          echo "::error title=Version already published::$PACKAGE_NAME $VERSION already exists on PyPI — has the version been bumped?"
+          exit 1
+        fi
         ;;
       404)
+        echo "already_published=false" >> "$GITHUB_OUTPUT"
         echo "$PACKAGE_NAME $VERSION is available on PyPI."
         ;;
       *)

@@ -32,11 +32,17 @@
       echo "$NOTES_B64" | base64 -d 2>/dev/null || echo "(unavailable)"
     else
       echo "$NOTES_B64" | base64 -d 2>/dev/null > /tmp/release-notes.md
-      gh release create "$TAG" \
-        --title "$TITLE" \
-        --notes-file /tmp/release-notes.md \
-        --target "$SHA"
-      # Attach the SBOM when one was generated for this release.
+      # Idempotent: a heal re-run of an already-shipped lane finds its tag/release already
+      # present — skip creation rather than hard-fail on the existing tag.
+      if gh release view "$TAG" >/dev/null 2>&1; then
+        echo "GitHub release $TAG already exists; skipping creation."
+      else
+        gh release create "$TAG" \
+          --title "$TITLE" \
+          --notes-file /tmp/release-notes.md \
+          --target "$SHA"
+      fi
+      # Attach the SBOM when one was generated for this release (--clobber → idempotent).
       if [ "$SBOM_ENABLED" = "true" ] && [ -f "$WORKING_DIRECTORY/sbom.json" ]; then
         gh release upload "$TAG" "$WORKING_DIRECTORY/sbom.json" --clobber
       fi

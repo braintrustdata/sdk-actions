@@ -1,12 +1,12 @@
 name: Configure Python Release
 description: >
-  Derives release facts for a Python package — read-only, no token. Checks out the
-  SHA, sets up uv (with a default Python the action guarantees itself — no
-  python_version input) to read the version, and computes the release tag, the branch
-  (and whether it's a release branch), the commit message, the previous release tag,
-  and the github_release default from release_type. Its outputs feed validate,
-  request-approval, and build-and-ship. Judging/checks live in the validate action;
-  this action never fails on release state.
+  Produces the release FACTS for a Python package — the fact-finding half of the pipeline
+  (validate judges these; it never fails on release state). Checks out the SHA, sets up uv,
+  reads the version, computes the release tag/branch/commit/github_release, checks PyPI for
+  whether the version is already published (→ already_published + version_url), fetches
+  release notes + PR list, and assembles the package manifest. Requires contents: write on
+  the calling job (for the generate-notes API). Its outputs (incl. `package`) feed
+  validate, request-approval, and ship.
 
 inputs:
   sha:
@@ -46,6 +46,23 @@ inputs:
     description: "Comma-separated allowed release branch patterns (globs)."
     required: false
     default: 'main'
+  pypi_package_name:
+    description: "PyPI package name. Enables the availability check + the manifest's pypi registry entry."
+    required: false
+    default: ''
+  package_label:
+    description: "Display label raw material for notifications (presentation-agnostic; the renderer formats it)."
+    required: false
+    default: ''
+  emoji:
+    description: "Presentation emoji raw material for notifications."
+    required: false
+    default: ''
+  prev_release:
+    description: "Release-notes anchor override (tag or SHA). Empty → configure's derived previous tag."
+    required: false
+    default: ''
+
 outputs:
   version:
     description: "The resolved package version"
@@ -68,6 +85,21 @@ outputs:
   github_release:
     description: "Whether a GitHub release should be created"
     value: ${{ steps.configure.outputs.github_release }}
+  already_published:
+    description: "Whether the version is already published to PyPI"
+    value: ${{ steps.version-check.outputs.already_published }}
+  version_url:
+    description: "Human URL for the version on PyPI"
+    value: ${{ steps.version-check.outputs.version_url }}
+  pr_list:
+    description: "Formatted PR list (x1f-delimited)"
+    value: ${{ steps.fetch.outputs.pr_list }}
+  notes:
+    description: "Base64-encoded release notes"
+    value: ${{ steps.fetch.outputs.notes }}
+  package:
+    description: "A JSON object describing the package to be published."
+    value: ${{ steps.build.outputs.package }}
 
 runs:
   using: composite
@@ -77,16 +109,12 @@ runs:
         ref: ${{ inputs.sha }}
         fetch-depth: 0
 
-    # configure reads the version (version.py) — so it sets up uv with a default Python
-    # itself. The requirement is guaranteed by the action (no python_version input); any
-    # Python reads the version, and the project's pinned toolchain is only needed to
-    # BUILD (validate / build-and-ship). Read-only: no dependency install.
+    # Read-only version read: a default Python reads version_file; the project's pinned
+    # toolchain is only needed to BUILD (validate / ship). No dependency install.
     - name: Set up uv
       uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9 # v7.2.0
       with:
         python-version: '3.13'
-        # No dependency install here, so leave the cache off — otherwise setup-uv's
-        # post-job save-cache errors on the empty cache and fails the job.
         enable-cache: "false"
 
 <%= render_step('lang/py/read-version') %>
@@ -99,5 +127,31 @@ runs:
       release_type:   "${{ inputs.release_type }}",
       channel:        "",
       github_release: "${{ inputs.github_release }}") %>
+
+<%# Fact: is this version already on PyPI? (severity off — validate judges it, this never fails). -%>
+<%= render_step('lang/py/pypi/availability',
+      package_name: "${{ inputs.pypi_package_name }}",
+      version:      "${{ steps.read-version.outputs.version }}",
+      severity:     'off') %>
+
+<%# Fact: release notes + PR list (needs contents: write on the job). -%>
+<%= render_step('release/prepare-notes',
+      release_tag:  "${{ steps.configure.outputs.release_tag }}",
+      sha:          "${{ inputs.sha }}",
+      prev_release: "${{ inputs.prev_release || steps.configure.outputs.prev_release }}") %>
+
+<%# Assemble the package object (single home of the schema). -%>
+<%= render_step('release/build-manifest',
+      label:                  "${{ inputs.package_label }}",
+      emoji:                  "${{ inputs.emoji }}",
+      tag:                    "${{ steps.configure.outputs.release_tag }}",
+      prev_release:           "${{ inputs.prev_release || steps.configure.outputs.prev_release }}",
+      pr_list:                "${{ steps.fetch.outputs.pr_list }}",
+      notes:                  "${{ steps.fetch.outputs.notes }}",
+      github_release:         "${{ steps.configure.outputs.github_release }}",
+      pypi_name:              "${{ inputs.pypi_package_name }}",
+      pypi_version:           "${{ steps.read-version.outputs.version }}",
+      pypi_version_url:       "${{ steps.version-check.outputs.version_url }}",
+      pypi_already_published: "${{ steps.version-check.outputs.already_published }}") %>
 
 <%= render_step('lang/py/env-dump', if: "${{ failure() }}") %>

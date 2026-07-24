@@ -71,6 +71,10 @@ inputs:
     description: "npm package name — used to build the npm link in notifications"
     required: false
     default: ''
+  already_published:
+    description: "Whether the version is already on npm (from configure). When 'true', the publish is skipped."
+    required: false
+    default: ''
   label:
     description: "Display name for release notifications (e.g. the package name)."
     required: false
@@ -90,7 +94,7 @@ inputs:
     description: "Whether the SHA is on an expected release branch"
     required: true
   pr_list:
-    description: "x1f-delimited PR list from prepare action"
+    description: "x1f-delimited PR list from configure"
     required: false
     default: ''
   slack_token:
@@ -125,7 +129,12 @@ runs:
 
 <%= render_step('lang/js/npm/setup') %>
 
-<%= render_step('lang/js/npm/publish-package', tarball: "${{ inputs.tarball }}") %>
+<%# Idempotency: gate the publish on the already_published FACT produced by configure (one
+    registry check, upstream — ship never re-queries, so it can't drift from validate/approval).
+    An already-published version is skipped (the step shows as skipped). -%>
+<%= render_step('lang/js/npm/publish-package',
+      if:      "${{ inputs.already_published != 'true' }}",
+      tarball: "${{ inputs.tarball }}") %>
 
 <%= render_step('release/create-github-release') %>
 

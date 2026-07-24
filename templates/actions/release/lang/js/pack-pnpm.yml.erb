@@ -69,6 +69,28 @@ runs:
 
 <%= render_step('lang/js/pnpm/build', if: "${{ inputs.build == 'true' }}") %>
 
+    - name: Resolve packaging pnpm
+      # pack + sbom need pnpm >= 11.8, but install/build above use the project's own pnpm — which may
+      # pin an OLDER pnpm (packageManager) to honor its supply-chain config. Resolve the packaging
+      # pnpm here and export $PACK_PNPM for those two steps: the project's pnpm when it already
+      # satisfies >= 11.8, else a pinned one via corepack. --pm-on-fail=ignore only bypasses pnpm's
+      # packageManager version-mismatch refusal; the pack/sbom logic is the standard logic for that
+      # version, so the attested tarball bytes + SBOM are exactly what a same-version job produces.
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      env:
+        PINNED: '11.9.0'  # sdk-actions-tested pnpm for pack + sbom (>= 11.8); bump centrally as pnpm advances
+        COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+      run: |
+        CUR=$(pnpm --version 2>/dev/null || echo 0)
+        if printf '11.8.0\n%s\n' "$CUR" | sort -VC; then
+          echo "PACK_PNPM=pnpm" >> "$GITHUB_ENV"
+          echo "Packaging with the project's pnpm $CUR (>= 11.8)"
+        else
+          echo "PACK_PNPM=corepack pnpm@$PINNED --pm-on-fail=ignore" >> "$GITHUB_ENV"
+          echo "Project pnpm $CUR is < 11.8 — packaging with pinned pnpm $PINNED"
+        fi
+
 <%= render_step('lang/js/pnpm/pack') %>
 
 <%= render_step('release/lang/js/validate-package') %>

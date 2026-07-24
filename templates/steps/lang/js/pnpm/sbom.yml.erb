@@ -4,8 +4,9 @@
   `--prod` restricts it to the production dependency closure — the deps a consumer
   of the published package actually gets — so the dev toolchain isn't included.
   The composing action gates this step with `if: inputs.sbom == 'true'`. Assumes
-  lang/js/setup installed dependencies. Fails fast with a clear message when pnpm
-  is too old to provide the native `sbom` command.
+  lang/js/setup installed dependencies. Runs via ${PACK_PNPM:-pnpm} (see the
+  "Resolve packaging pnpm" step, which guarantees a pnpm ≥ 11.8). Fails fast with a
+  clear message when the resolved pnpm is too old to provide the native `sbom` command.
 
   @param working_directory [String] expr for the package root. Default: ${{ inputs.working_directory }}
 -%>
@@ -13,9 +14,10 @@
   shell: bash
   working-directory: <%= locals.fetch(:working_directory) { "${{ inputs.working_directory }}" } %>
   run: |
-    if ! pnpm sbom --help >/dev/null 2>&1; then
+    PNPM="${PACK_PNPM:-pnpm}"
+    if ! $PNPM sbom --help >/dev/null 2>&1; then
       echo "::error title=pnpm sbom unavailable::'pnpm sbom' needs pnpm >= 11.8. Set the package's packageManager (or pnpm_version) to >= 11.8."
       exit 1
     fi
-    pnpm sbom --sbom-format cyclonedx --prod --out sbom.json
+    $PNPM sbom --sbom-format cyclonedx --prod --out sbom.json
     echo "Wrote $(pwd)/sbom.json"

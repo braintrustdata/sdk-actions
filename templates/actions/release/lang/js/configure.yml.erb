@@ -1,11 +1,12 @@
 name: Configure JavaScript Release
 description: >
-  Derives release facts for a JavaScript package — read-only, no token. Checks out the
-  SHA, sets up Node and pnpm, reads the package version, and computes the release tag,
-  the branch (and whether it's a release branch), the commit message, the previous
-  release tag, and the channel + github_release defaults from release_type (explicit
-  overrides win). Its outputs feed validate, request-approval, and build-and-ship.
-  Judging/checks live in the validate action; this action never fails on release state.
+  Produces the release FACTS for a JavaScript package — the fact-finding half of the
+  pipeline (validate judges these; it never fails on release state). Checks out the SHA,
+  sets up Node, reads the version, computes the release tag/branch/commit/channel/
+  github_release, checks npm for whether the version is already published (→
+  already_published + version_url), fetches release notes + PR list, and assembles the
+  package manifest. Requires contents: write on the calling job (for the generate-notes
+  API). Its outputs (incl. `package`) feed validate, request-approval, and ship.
 
 inputs:
   sha:
@@ -32,7 +33,7 @@ inputs:
       inputs override this.
     required: false
     default: 'stable'
-  channel:
+  npm_channel:
     description: "Explicit npm channel (dist-tag) override. Empty → derived from release_type."
     required: false
     default: ''
@@ -44,6 +45,27 @@ inputs:
     description: "Comma-separated allowed release branch patterns (globs)."
     required: false
     default: 'main'
+  npm_registry:
+    description: "npm registry URL (for the availability check)."
+    required: false
+    default: 'https://registry.npmjs.org'
+  npm_package_name:
+    description: "npm package name. Enables the availability check + the manifest's npm registry entry."
+    required: false
+    default: ''
+  package_label:
+    description: "Display label raw material for notifications (presentation-agnostic; the renderer formats it)."
+    required: false
+    default: ''
+  emoji:
+    description: "Presentation emoji raw material for notifications."
+    required: false
+    default: ''
+  prev_release:
+    description: "Release-notes anchor override (tag or SHA). Empty → configure's derived previous tag."
+    required: false
+    default: ''
+
 outputs:
   version:
     description: "The resolved package version"
@@ -69,6 +91,21 @@ outputs:
   github_release:
     description: "Whether a GitHub release should be created"
     value: ${{ steps.configure.outputs.github_release }}
+  already_published:
+    description: "Whether the version is already published to npm"
+    value: ${{ steps.version-check.outputs.already_published }}
+  version_url:
+    description: "Human URL for the version on npm"
+    value: ${{ steps.version-check.outputs.version_url }}
+  pr_list:
+    description: "Formatted PR list (x1f-delimited)"
+    value: ${{ steps.fetch.outputs.pr_list }}
+  notes:
+    description: "Base64-encoded release notes"
+    value: ${{ steps.fetch.outputs.notes }}
+  package:
+    description: "A JSON object describing the package to be published."
+    value: ${{ steps.build.outputs.package }}
 
 runs:
   using: composite
@@ -78,11 +115,8 @@ runs:
         ref: ${{ inputs.sha }}
         fetch-depth: 0
 
-    # configure reads package.json — so it sets up a default Node itself. The
-    # requirement is satisfied by the action (no node_version input, no consumer
-    # config): any Node reads the version, and the project's pinned toolchain is only
-    # needed to BUILD (validate / build-and-ship). A node-runtime read never touches
-    # engines/devEngines, so this is safe in strict-pnpm repos. No pnpm, no install.
+    # Read-only version read: any Node reads package.json; the project's pinned toolchain
+    # is only needed to BUILD (validate / ship). Safe in strict-pnpm repos. No pnpm/install.
     - name: Set up Node
       uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
       with:
@@ -96,7 +130,35 @@ runs:
       tag_format:     "${{ inputs.tag_format }}",
       release_branch: "${{ inputs.release_branch }}",
       release_type:   "${{ inputs.release_type }}",
-      channel:        "${{ inputs.channel }}",
+      channel:        "${{ inputs.npm_channel }}",
       github_release: "${{ inputs.github_release }}") %>
+
+<%# Fact: is this version already on npm? (severity off — validate judges it, this never fails). -%>
+<%= render_step('lang/js/npm/availability',
+      package_name: "${{ inputs.npm_package_name }}",
+      version:      "${{ steps.read-version.outputs.version }}",
+      registry:     "${{ inputs.npm_registry }}",
+      severity:     'off') %>
+
+<%# Fact: release notes + PR list (needs contents: write on the job). -%>
+<%= render_step('release/prepare-notes',
+      release_tag:  "${{ steps.configure.outputs.release_tag }}",
+      sha:          "${{ inputs.sha }}",
+      prev_release: "${{ inputs.prev_release || steps.configure.outputs.prev_release }}") %>
+
+<%# Assemble the package object (single home of the schema). -%>
+<%= render_step('release/build-manifest',
+      label:                 "${{ inputs.package_label }}",
+      emoji:                 "${{ inputs.emoji }}",
+      tag:                   "${{ steps.configure.outputs.release_tag }}",
+      prev_release:          "${{ inputs.prev_release || steps.configure.outputs.prev_release }}",
+      pr_list:               "${{ steps.fetch.outputs.pr_list }}",
+      notes:                 "${{ steps.fetch.outputs.notes }}",
+      github_release:        "${{ steps.configure.outputs.github_release }}",
+      npm_name:              "${{ inputs.npm_package_name }}",
+      npm_version:           "${{ steps.read-version.outputs.version }}",
+      npm_channel:           "${{ steps.configure.outputs.channel }}",
+      npm_version_url:       "${{ steps.version-check.outputs.version_url }}",
+      npm_already_published: "${{ steps.version-check.outputs.already_published }}") %>
 
 <%= render_step('lang/js/env-dump', if: "${{ failure() }}") %>

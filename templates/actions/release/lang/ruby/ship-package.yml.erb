@@ -37,6 +37,14 @@ inputs:
     description: "RubyGems gem name — used to build the RubyGems link in notifications"
     required: false
     default: ''
+  version:
+    description: "Gem version being released — used to build the RubyGems link in notifications."
+    required: false
+    default: ''
+  already_published:
+    description: "Whether the version is already on RubyGems (from configure). When 'true', the push is skipped."
+    required: false
+    default: ''
   label:
     description: "Display name for release notifications (e.g. the gem name)."
     required: false
@@ -56,7 +64,7 @@ inputs:
     description: "Whether the SHA is on an expected release branch"
     required: true
   pr_list:
-    description: "x1f-delimited PR list from prepare action"
+    description: "x1f-delimited PR list from configure"
     required: false
     default: ''
   slack_token:
@@ -94,6 +102,7 @@ runs:
       if:        "${{ inputs.dry_run != 'true' }}",
       artifacts: "${{ inputs.working_directory }}/*.gem") %>
 
+<%# Idempotency: the push step self-gates on configure's already_published fact (no re-query). -%>
 <%= render_step('lang/ruby/rubygems/push', gem: "*.gem") %>
 
 <%= render_step('release/create-github-release') %>

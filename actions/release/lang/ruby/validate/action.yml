@@ -6,28 +6,17 @@ description: >
   (tag unused, version unpublished on RubyGems, notes present, release branch) — and
   runs lint + a pre-gate build + CycloneDX SBOM generation so failures surface BEFORE
   the approval gate. Read-only: nothing is signed or published here. Every check is a
-  boolean toggle (default on) with an escape hatch.
+  boolean toggle (default on) with an escape hatch. Consumes `configure`'s
+  `already_published` fact (does not query RubyGems itself).
 
 inputs:
   sha:
     description: "Commit SHA being released"
     required: true
   dry_run:
-    description: "Warn instead of failing on an already-existing tag"
+    description: "Warn instead of failing on an already-existing tag / already-published version"
     required: false
     default: 'false'
-  version:
-    description: "Version override (from configure). If empty, read from version_file/version_module."
-    required: false
-    default: ''
-  version_file:
-    description: "Path to the Ruby version file (e.g. lib/gem_name/version.rb)"
-    required: false
-    default: ''
-  version_module:
-    description: "Ruby module holding the VERSION constant (e.g. GemName)"
-    required: false
-    default: ''
   working_directory:
     description: "Path to the gem root (where Gemfile and gemspec live)"
     required: false
@@ -36,13 +25,6 @@ inputs:
     description: "Ruby version to use, or a version file path (.tool-versions, .ruby-version)"
     required: false
     default: '4.0'
-  package_name:
-    description: >
-      RubyGems gem name. Used by the version-unpublished check — the registry, not the
-      git tag, is the source of truth (covers prereleases and force-deleted tags). Leave
-      empty to skip that check.
-    required: false
-    default: ''
   release_tag:
     description: "The release tag (from configure) — checked for prior existence"
     required: true
@@ -51,7 +33,11 @@ inputs:
     required: false
     default: 'true'
   notes:
-    description: "Base64-encoded release notes (from prepare) — checked non-blank"
+    description: "Base64-encoded release notes (from configure) — checked non-blank"
+    required: false
+    default: ''
+  already_published:
+    description: "Whether the version is already on RubyGems (from configure). Judged by check_version_unpublished."
     required: false
     default: ''
   build:
@@ -72,7 +58,7 @@ inputs:
     required: false
     default: 'true'
   check_version_unpublished:
-    description: "Fail if the version is already published to RubyGems"
+    description: "Fail if the version is already published to RubyGems (judges configure's already_published)"
     required: false
     default: 'true'
   check_notes_not_blank:
@@ -99,53 +85,6 @@ runs:
         bundler-cache: true
         working-directory: ${{ inputs.working_directory }}
 
-    - name: Read version
-      id: read-version
-      shell: bash
-      env:
-        VERSION_OVERRIDE: ${{ inputs.version }}
-        VERSION_FILE: ${{ inputs.version_file }}
-        VERSION_MODULE: ${{ inputs.version_module }}
-      run: |
-        if [ -n "$VERSION_OVERRIDE" ]; then
-          VERSION="$VERSION_OVERRIDE"
-        else
-          VERSION=$(ruby -r "./$VERSION_FILE" -e "puts Object.const_get(ENV.fetch('VERSION_MODULE')).const_get(:VERSION)")
-        fi
-        if [ -z "$VERSION" ]; then
-          echo "::error title=Could not read version::resolved an empty version — check VERSION in $VERSION_FILE (module $VERSION_MODULE), or pass a version override."
-          exit 1
-        fi
-        echo "version=$VERSION" >> $GITHUB_OUTPUT
-
-    - name: Check RubyGems version availability
-      if: ${{ inputs.check_version_unpublished == 'true' }}
-      shell: bash
-      env:
-        PACKAGE_NAME: ${{ inputs.package_name }}
-        VERSION: ${{ steps.read-version.outputs.version }}
-      run: |
-        if [ -z "$PACKAGE_NAME" ]; then
-          echo "No package_name provided; skipping RubyGems availability check."
-          exit 0
-        fi
-        CODE=$(curl -sS -o /dev/null -w '%{http_code}' \
-          --retry 3 --retry-connrefused --max-time 30 \
-          "https://rubygems.org/api/v2/rubygems/$PACKAGE_NAME/versions/$VERSION.json")
-        case "$CODE" in
-          200)
-            echo "::error title=Version already published::$PACKAGE_NAME $VERSION already exists on RubyGems — has the version been bumped?"
-            exit 1
-            ;;
-          404)
-            echo "$PACKAGE_NAME $VERSION is available on RubyGems."
-            ;;
-          *)
-            echo "::error title=Registry check failed::unexpected response from RubyGems (HTTP $CODE) checking $PACKAGE_NAME $VERSION — cannot confirm the version is unpublished; aborting rather than risk a bad release."
-            exit 1
-            ;;
-        esac
-
     - name: Check release
       shell: bash
       env:
@@ -156,7 +95,20 @@ runs:
         CHECK_TAG_UNUSED: ${{ inputs.check_tag_unused }}
         CHECK_NOTES: ${{ inputs.check_notes_not_blank }}
         ENFORCE_RELEASE_BRANCH: ${{ inputs.enforce_release_branch }}
+        CHECK_VERSION_UNPUBLISHED: ${{ inputs.check_version_unpublished }}
+        ALREADY_PUBLISHED: ${{ inputs.already_published }}
       run: |
+        # Version not already published on the registry (fact from configure's availability check;
+        # covers prereleases, which aren't git-tagged). Warn (not fail) on a dry run.
+        if [ "$CHECK_VERSION_UNPUBLISHED" = "true" ] && [ "$ALREADY_PUBLISHED" = "true" ]; then
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "::warning title=Version already published::the version is already on the registry — skipping in dry run."
+          else
+            echo "::error title=Version already published::the version is already on the registry — has the version been bumped?"
+            exit 1
+          fi
+        fi
+
         # Tag not already used (covers stable releases; prereleases are covered by the availability check)
         if [ "$CHECK_TAG_UNUSED" = "true" ] && git rev-parse "$TAG" >/dev/null 2>&1; then
           if [ "$DRY_RUN" = "true" ]; then

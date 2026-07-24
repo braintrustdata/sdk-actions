@@ -61,11 +61,15 @@ inputs:
     description: "Whether the SHA is on an expected release branch"
     required: true
   pr_list:
-    description: "x1f-delimited PR list from prepare action"
+    description: "x1f-delimited PR list from configure"
     required: false
     default: ''
   gem_name:
     description: "RubyGems gem name — used to build the RubyGems link in notifications"
+    required: false
+    default: ''
+  already_published:
+    description: "Whether the version is already on RubyGems (from configure). When 'true', the push is skipped."
     required: false
     default: ''
   label:

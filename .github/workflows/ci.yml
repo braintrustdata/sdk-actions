@@ -6,6 +6,19 @@ on:
   pull_request:
 
 jobs:
+  jq-release-manifest:
+    name: jq release manifest (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-22.04, ubuntu-latest]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Check release manifest jq compatibility
+        run: python3 scripts/check_jq16_release_manifest.py
+
   # Regenerates actions/ AND the golden workflow fixtures from templates/, validates
   # them (YAML + schema), and fails if either committed output is out of sync. Both are
   # generated output and must always match the templates. Least-privilege: no secrets.
